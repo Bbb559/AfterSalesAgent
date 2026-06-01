@@ -1,0 +1,21 @@
+# 正式虚拟环境安装 requirements.txt 后，执行下面命令刷新完整锁定环境：
+# python -m pip freeze > requirements.lock.txt
+#
+# 当前文件先保留顶层依赖约束，避免在未安装完整 V2 环境时生成错误锁文件。
+pypdf
+python-dotenv
+dashscope
+openai
+langchain
+langchain-text-splitters
+langchain-mineru
+langgraph
+fastapi
+uvicorn
+python-multipart
+gradio
+faiss-cpu
+rank-bm25
+numpy
+jieba
+requests

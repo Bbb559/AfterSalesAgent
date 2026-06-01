@@ -1,0 +1,16 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+data/uploads/
+data/indexes/
+data/chunks/
+data/parsed_json/
+data/markdown/
+logs/
+*.log
+
+.pytest_cache/
+.ruff_cache/

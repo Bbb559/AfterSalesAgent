@@ -1,0 +1,17 @@
+[
+  {
+    "user_input": "QY-320 显示 E03，出水变慢，买了半年",
+    "expected_fault_code": "E03",
+    "expected_product_model": "QY-320",
+    "expected_escalation": false
+  },
+  {
+    "user_input": "机器漏水把插座打湿了",
+    "expected_escalation": true,
+    "expected_risk_level": "high"
+  },
+  {
+    "user_input": "买了一年半还能免费维修吗？",
+    "expected_intent": "warranty_consultation"
+  }
+]

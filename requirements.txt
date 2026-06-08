@@ -1,10 +1,11 @@
-pypdf
+﻿pypdf
 python-dotenv
 dashscope
 openai
 langchain
+langchain-openai
+langchain-deepseek
 langchain-text-splitters
-langchain-mineru
 langgraph
 fastapi
 uvicorn

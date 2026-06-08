@@ -1,1 +1,1 @@
-"""Business rules for the after-sales agent."""
+"""充电桩安全诊断使用的本地硬规则。"""

@@ -18,8 +18,6 @@ from backend.config import (
     MINERU_TIMEOUT,
     MINERU_DOWNLOAD_RETRY, # 下载失败重试次数
     MINERU_DOWNLOAD_TIMEOUT, # 下载超时时间（秒）
-    LANGCHAIN_MINERU_SPLIT_PAGES,
-    LANGCHAIN_MINERU_TIMEOUT,
     get_mineru_download_verify_ssl,
 )
 
@@ -48,13 +46,13 @@ def parse_with_pypdf(uploaded_files):
 
 
 def parse_with_mineru(uploaded_files):
-    """使用 MinerU 官方 API 解析本地 PDF 文件.
+    """使用 MinerU 官方 API 解析本地 PDF 文件。
 
     流程：
-    1. 创建批量上传任务和签名上传 URL;
-    2. 将每个 PDF 上传到其 URL;
-    3. 轮询批量结果，直到所有文件都完成解析;
-    4. 将 Markdown 输出转换为项目页面记录.
+    1. 创建批量上传任务和签名上传 URL。
+    2. 将每个 PDF 上传到对应 URL。
+    3. 轮询批量结果，直到所有文件都完成解析。
+    4. 将 Markdown 文本转换为项目页面记录。
     """
     if not MINERU_API_TOKEN:
         raise ValueError("请先在 .env 中配置 MINERU_API_TOKEN。")
@@ -79,68 +77,6 @@ def parse_with_mineru(uploaded_files):
             temp_path.unlink(missing_ok=True)
             uploaded_file.seek(0)
 
-
-def parse_with_langchain_mineru(uploaded_files, mode="flash"):
-    """用 langchain-mineru 直接加载 Document，绕过旧接口的 ZIP 下载分支。"""
-    try:
-        from langchain_mineru import MinerULoader
-    except ModuleNotFoundError as error:
-        raise RuntimeError("缺少 langchain-mineru，请先执行 pip install langchain-mineru。") from error
-
-    if mode == "precision" and not MINERU_API_TOKEN:
-        raise ValueError("langchain-mineru precision 模式需要在 .env 中配置 MINERU_API_TOKEN。")
-
-    pages = []
-    temp_paths = []
-    try:
-        for uploaded_file in uploaded_files:
-            temp_path = _save_uploaded_file(uploaded_file)
-            temp_paths.append((uploaded_file, temp_path))
-
-            loader_kwargs = {
-                "source": str(temp_path),
-                "mode": mode,
-                "language": MINERU_LANGUAGE,
-                "split_pages": LANGCHAIN_MINERU_SPLIT_PAGES,
-                "timeout": LANGCHAIN_MINERU_TIMEOUT,
-                "ocr": MINERU_IS_OCR,
-                "formula": MINERU_ENABLE_FORMULA,
-                "table": MINERU_ENABLE_TABLE,
-            }
-            if MINERU_PAGE_RANGES:
-                loader_kwargs["pages"] = MINERU_PAGE_RANGES
-            if mode == "precision":
-                loader_kwargs["token"] = MINERU_API_TOKEN
-
-            loader = MinerULoader(**loader_kwargs)
-            docs = loader.load()
-            pages.extend(_langchain_docs_to_pages(docs, uploaded_file.name, mode))
-
-        return pages
-    finally:
-        for uploaded_file, temp_path in temp_paths:
-            temp_path.unlink(missing_ok=True)
-            uploaded_file.seek(0)
-
-
-def _langchain_docs_to_pages(docs, fallback_file_name, mode):
-    pages = []
-    for index, doc in enumerate(docs, start=1):
-        text = (getattr(doc, "page_content", "") or "").strip()
-        if not text:
-            continue
-
-        metadata = getattr(doc, "metadata", {}) or {}
-        page_no = metadata.get("page") or metadata.get("page_number") or index
-        file_name = metadata.get("filename") or Path(str(metadata.get("source", fallback_file_name))).name
-
-        pages.append({
-            "file_name": file_name or fallback_file_name,
-            "page": page_no,
-            "text": text,
-            "parser": f"langchain-mineru-{mode}",
-        })
-    return pages
 
 # 生成 MinerU API 请求头
 def _mineru_headers():
@@ -179,7 +115,7 @@ def _create_mineru_batch(temp_paths):
         timeout=60,
     )
     response.raise_for_status()
-    payload = response.json() # 转化为python字典
+    payload = response.json() # 转为 Python 字典
 
     if payload.get("code") != 0:
         raise RuntimeError(f"MinerU 创建批量任务失败：{payload}")
@@ -362,7 +298,7 @@ def _download_file_with_retry(url, output_path, attempt):
 
 
 def _markdown_to_pages(markdown, file_name):
-    # MinerU 的 markdown 默认是整文输出。这里按页眉标记尽力切页；
+    # MinerU 的 Markdown 文本默认是整文输出。这里按页眉标记尽力切页；
     # 若结果没有页标记，就作为第 1 页进入后续清洗和分块。
     page_markers = ["\n\n--- page ", "\n\n# Page ", "\n\n## Page "]
 
@@ -405,11 +341,8 @@ def _split_markdown_by_marker(markdown, marker, file_name):
 
 
 def parse_pdfs(uploaded_files, parser_name="pypdf"):
-    if parser_name == "langchain-mineru-flash":
-        return parse_with_langchain_mineru(uploaded_files, mode="flash")
-    if parser_name == "langchain-mineru-precision":
-        return parse_with_langchain_mineru(uploaded_files, mode="precision")
+    if parser_name == "pypdf":
+        return parse_with_pypdf(uploaded_files)
     if parser_name == "mineru":
         return parse_with_mineru(uploaded_files)
-    return parse_with_pypdf(uploaded_files)
-
+    raise ValueError(f"不支持的 PDF 解析器：{parser_name}")

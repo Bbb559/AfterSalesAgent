@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+"""基础工具类和工具注册器，提供工具执行的统一接口和错误处理机制。"""
 
 @dataclass
 class ToolResult:

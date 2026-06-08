@@ -4,8 +4,9 @@ from typing import Any
 
 from backend.rag.rag_service import RAGService
 
+
 class RetrievalAgent:
-    """ 围绕现有 RAG 检索流程的适配器."""
+    """围绕现有 RAG 检索流程的适配器。"""
 
     def __init__(self, rag_service: RAGService):
         self.rag_service = rag_service

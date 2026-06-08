@@ -96,6 +96,6 @@ def _build_chunk(page, chunk_text, chunk_index):
         "parser": parser,
         "doc_type": page.get("doc_type", ""),
         "product_line": page.get("product_line", ""),
-        "product_model": page.get("product_model", ""),
+        "item_identifier": page.get("item_identifier", ""),
         "version": page.get("version", ""),
     }

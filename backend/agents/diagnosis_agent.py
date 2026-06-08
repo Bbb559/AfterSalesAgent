@@ -1,95 +1,127 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from backend.rules.fault_rules import FAULT_RULES
-from backend.rules.risk_rules import RISK_KEYWORDS
-from backend.schemas import DiagnosisResult
+from backend.agents.llm_utils import invoke_json
+from backend.prompts.diagnosis import CHARGER_DIAGNOSIS_PROMPT
+from backend.schemas import ChargerDiagnosisResult
 
 
-class DiagnosisAgent:
-    """根据病因字段和RAG命中创建初步有据诊断."""
+class ChargerDiagnosisAgent:
+    """使用 LLM JSON 链生成充电桩安全诊断。"""
 
-    def diagnose(self, case: dict[str, Any], retrieval: dict[str, Any]) -> dict[str, Any]:
-        results = retrieval.get("results", [])  # 取前3条检索结果作为诊断依据
-        evidence_text = "\n".join(item.get("text", "") for item in results[:3]) # 拼接检索结果文本作为诊断参考
-        fault_code = case.get("fault_code", "") # 获取故障码
-        symptoms = case.get("symptoms", []) # 获取故障现象
-        symptom_text = "、".join(symptoms) # 将故障现象用顿号连接成一段文本，方便后续关键词匹配
+    PRIORITY_VALUES = {"p0_emergency", "p1_high", "p2_medium", "p3_low", "normal"}
 
-        possible_causes = [] # 可能的故障原因
-        remote_steps = [] # 远程排查步骤
-        priority = "normal" # 故障优先级，默认为normal
+    def __init__(self, llm: Any | None = None) -> None:
+        self.llm = llm
 
-        fault_rule = FAULT_RULES.get(fault_code) 
-        if fault_rule:
-            possible_causes.extend(fault_rule["possible_causes"])
-            remote_steps.extend(fault_rule["suggested_actions"])
-            priority = fault_rule["priority"]
-        elif fault_code:
-            possible_causes.append(f"知识库中需要优先核对故障码 {fault_code} 的定义和处理流程。")
+    def diagnose(
+        self,
+        case: dict[str, Any],
+        retrieval: dict[str, Any],
+        tools: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        fallback = self._fallback_diagnose(case, retrieval)
+        llm_result = invoke_json(
+            self.llm,
+            CHARGER_DIAGNOSIS_PROMPT,
+            {
+                "case": json.dumps(case, ensure_ascii=False),
+                "retrieval": json.dumps(self._compact_retrieval(retrieval), ensure_ascii=False),
+                "tools": json.dumps(tools or {}, ensure_ascii=False),
+            },
+        )
+        return self._normalize_diagnosis(llm_result, fallback, retrieval) if llm_result else fallback
 
-        if any(word in symptom_text for word in ["出水慢", "出水变慢", "不出水"]):
-            possible_causes.extend(["进水压力不足", "前置滤芯堵塞", "进水阀未完全打开"])
-        if any(word in symptom_text for word in ["漏水", "渗水", "插座打湿"]):
-            possible_causes.extend(["接头松动", "滤芯或管路密封异常"])
-        if not possible_causes:
-            possible_causes.append("客户描述仍不完整，需要补充现象、故障码和设备状态。")
+    def _normalize_diagnosis(
+        self,
+        llm_result: dict[str, Any],
+        fallback: dict[str, Any],
+        retrieval: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = dict(fallback)
+        for key in ["summary", "suggested_next_step"]:
+            value = self._clean_text(llm_result.get(key))
+            if value:
+                normalized[key] = value
 
-        risk_flags = [word for word in RISK_KEYWORDS if word in case.get("raw_text", "")]
-        urgency = "normal"
-        if any(RISK_KEYWORDS[word] == "high" for word in risk_flags):
-            urgency = "high"
-            priority = "high"
-        elif any(RISK_KEYWORDS[word] == "medium" for word in risk_flags):
-            priority = "medium"
+        evidence_status = self._clean_text(llm_result.get("evidence_status")).lower()
+        if evidence_status in {"grounded", "partial", "insufficient"}:
+            normalized["evidence_status"] = evidence_status
 
-        remote_steps.extend(self._build_steps(case, evidence_text))
+        priority = self._clean_text(llm_result.get("priority"))
+        if priority in self.PRIORITY_VALUES:
+            normalized["priority"] = priority
 
-        return DiagnosisResult(
-            summary=self._build_summary(case, possible_causes), # 初步诊断总结
-            possible_causes=list(dict.fromkeys(possible_causes)),# 可能的故障原因并去重
-            remote_steps=list(dict.fromkeys(remote_steps)),# 远程排查步骤然后去重
-            urgency=urgency, # 紧急程度
-            priority=priority, # 故障优先级
-            suggested_action=self._suggest_action(urgency, case),   # 建议处理方式
-            evidence_sources=retrieval.get("sources", []),   # 诊断依据的来源
-            risk_flags=risk_flags, # 诊断过程中识别出的风险关键词
+        for key in [
+            "likely_issue_areas",
+            "fault_code_interpretation",
+            "safe_remote_checks",
+            "onsite_reasons",
+            "risk_flags",
+            "evidence_sources",
+        ]:
+            values = self._string_list(llm_result.get(key))
+            if values:
+                normalized[key] = values
+
+        if not normalized.get("evidence_sources"):
+            normalized["evidence_sources"] = retrieval.get("sources", [])
+        return normalized
+
+    def _fallback_diagnose(self, case: dict[str, Any], retrieval: dict[str, Any]) -> dict[str, Any]:
+        brand = case.get("brand") or "待确认品牌"
+        model = case.get("charger_model") or "待确认型号"
+        issue = case.get("issue_description") or "问题描述待补充"
+        fault_codes = self._string_list(case.get("fault_codes"))
+        safe_checks = []
+        if fault_codes:
+            safe_checks.append(f"请先留存故障码 {'、'.join(fault_codes)} 的屏幕、App 报错或语音播报记录。")
+        else:
+            safe_checks.append("请补充故障发生时间、触发条件、是否可复现，以及 App/屏幕提示截图。")
+        safe_checks.append("请拍摄设备铭牌、安装环境、配电箱外观、枪线和车辆充电口状态照片。")
+        safe_checks.append("请补充订单或安装凭证、联系电话和安装地址，便于后续派工核验。")
+
+        if retrieval.get("results"):
+            summary = f"{brand} {model}，客户问题：{issue}。已检索到知识库资料，但当前未获得可用 LLM 诊断，需按资料继续核验。"
+            evidence_status = "partial"
+            suggested = "按知识库证据采集要求补充截图、铭牌和现场照片；仍异常或涉及安全信号时转人工/电工处理。"
+        else:
+            summary = f"{brand} {model}，客户问题：{issue}。当前知识库依据不足，不能自动判断具体原因或处理结论。"
+            evidence_status = "insufficient"
+            suggested = "请补充充电桩知识库依据，或转人工/电工核验后再给出具体处理方案。"
+
+        return ChargerDiagnosisResult(
+            summary=summary,
+            evidence_status=evidence_status,
+            likely_issue_areas=[],
+            fault_code_interpretation=[],
+            safe_remote_checks=safe_checks,
+            onsite_reasons=[],
+            priority="normal",
+            suggested_next_step=suggested,
+            evidence_sources=retrieval.get("sources", []),
+            risk_flags=[],
         ).to_dict()
 
-    def _build_summary(self, case: dict[str, Any], causes: list[str]) -> str:
-        model = case.get("product_model") or "未知型号"
-        fault = case.get("fault_code") or "未提供故障码"
-        symptoms = case.get("symptoms") or []
-        symptom = "、".join(symptoms) if symptoms else "现象待补充"
-        return f"{model}，{fault}，客户现象：{symptom}。初步关注：{'、'.join(causes[:3])}。"
+    def _compact_retrieval(self, retrieval: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "sources": retrieval.get("sources", []),
+            "results": [
+                {
+                    "file_name": item.get("file_name", ""),
+                    "page": item.get("page", ""),
+                    "text": item.get("text", "")[:700],
+                }
+                for item in retrieval.get("results", [])[:5]
+            ],
+        }
 
-    def _build_steps(self, case: dict[str, Any], evidence_text: str) -> list[str]:
-        steps = [
-            "确认设备型号、故障码、购买时间、门店地址和联系电话。",
-            "让客户拍摄设备屏幕、进水阀、水压状态和滤芯状态。",
-        ]
+    def _clean_text(self, value: Any) -> str:
+        return str(value or "").strip()
 
-        symptom = "、".join(case.get("symptoms", []))
-        if any(word in symptom for word in ["出水慢", "出水变慢", "不出水"]):
-            steps.extend([
-                "检查进水阀是否完全打开。",
-                "检查前置滤芯是否到期或堵塞。",
-                "确认同一水路其他设备是否也水压偏低。",
-            ])
-        if any(word in symptom for word in ["漏水", "渗水", "插座打湿"]):
-            steps.extend([
-                "确认漏水位置：进水口、滤芯仓、排水管或机身底部。",
-                "建议客户先断电并关闭进水阀，避免扩大损失。",
-            ])
-        if evidence_text:
-            steps.append("对照知识库检索依据执行对应 SOP。")
-
-        return steps
-
-    def _suggest_action(self, urgency: str, case: dict[str, Any]) -> str: 
-        if urgency == "high":
-            return "建议立即升级人工并创建上门工单。"
-        if case.get("fault_code") or case.get("symptoms"):
-            return "建议先远程排查；若无法恢复，再创建上门工单。"
-        return "建议先补充关键信息，再进入诊断流程。"
+    def _string_list(self, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]

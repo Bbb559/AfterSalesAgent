@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass
@@ -30,6 +30,7 @@ PARSED_JSON_DIR = DATA_DIR / "parsed_json"
 MARKDOWN_DIR = DATA_DIR / "markdown"
 CHUNKS_DIR = DATA_DIR / "chunks"
 INDEX_DIR = DATA_DIR / "indexes"
+MEMORY_DIR = DATA_DIR / "memory"
 
 
 # FastAPI 服务配置
@@ -43,28 +44,31 @@ GRADIO_HOST = os.getenv("GRADIO_HOST", "127.0.0.1")
 GRADIO_PORT = int(os.getenv("GRADIO_PORT", "7860"))
 
 
-# 大模型与 Embedding 配置
+# 大模型与向量模型配置
+API_KEY = os.getenv("API_KEY", "")
+DEFAULT_LLM_PROVIDER = os.getenv("DEFAULT_LLM_PROVIDER", "qwen")
 DASHSCOPE_BASE_URL = os.getenv(
     "DASHSCOPE_BASE_URL",
     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 DEFAULT_CHAT_MODEL = os.getenv("DEFAULT_CHAT_MODEL", "qwen-plus")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_CHAT_MODEL = os.getenv("DEEPSEEK_CHAT_MODEL", "deepseek-chat")
+LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "30"))
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "1"))
 DEFAULT_EMBEDDING_MODEL = os.getenv("DEFAULT_EMBEDDING_MODEL", "text-embedding-v3")
 DEFAULT_EMBEDDING_BATCH_SIZE = int(os.getenv("DEFAULT_EMBEDDING_BATCH_SIZE", "10"))
 
 
 # RAG 默认参数
 DEFAULT_PARSER = os.getenv("DEFAULT_PARSER", "pypdf")
-PARSER_OPTIONS = ["pypdf", "mineru", "langchain-mineru-flash", "langchain-mineru-precision"]
+PARSER_OPTIONS = ["pypdf", "mineru"]
 PARSER_LABELS = {
     "pypdf": "pypdf（推荐：文字型 PDF，数字更稳定）",
-    "mineru": "MinerU API（旧接口，可能依赖 ZIP 下载）",
-    "langchain-mineru-flash": "langchain-mineru flash（免 token，推荐先试）",
-    "langchain-mineru-precision": "langchain-mineru precision（需要 MinerU token）",
+    "mineru": "MinerU API（复杂版面补充，可能依赖 ZIP 下载）",
 }
 PARSER_HELP = (
     "建议优先使用 pypdf。扫描件、图片型 PDF、复杂表格或 pypdf 解析乱码时再尝试 MinerU。"
-    "如果旧 MinerU API 下载 ZIP 失败，可以改用 langchain-mineru flash 或 precision。"
     "MinerU 对部分期刊 PDF 可能出现正文数字缺失，构建后需要检查数字完整性。"
 )
 
@@ -74,6 +78,9 @@ DEFAULT_CHUNK_OVERLAP = int(os.getenv("DEFAULT_CHUNK_OVERLAP", "80"))
 DEFAULT_VECTOR_TOP_K = int(os.getenv("DEFAULT_VECTOR_TOP_K", "10"))
 DEFAULT_BM25_TOP_K = int(os.getenv("DEFAULT_BM25_TOP_K", "10"))
 DEFAULT_FINAL_TOP_K = int(os.getenv("DEFAULT_FINAL_TOP_K", "5"))
+DEFAULT_USE_QUERY_REWRITE = read_bool_env("DEFAULT_USE_QUERY_REWRITE", True)
+DEFAULT_QUERY_REWRITE_COUNT = int(os.getenv("DEFAULT_QUERY_REWRITE_COUNT", "3"))
+DEFAULT_QUERY_REWRITE_MAX_LENGTH = int(os.getenv("DEFAULT_QUERY_REWRITE_MAX_LENGTH", "200"))
 
 FAISS_INDEX_FILE = INDEX_DIR / "faiss.index"
 FAISS_CHUNKS_FILE = INDEX_DIR / "faiss_chunks.json"
@@ -93,19 +100,20 @@ MINERU_TIMEOUT = int(os.getenv("MINERU_TIMEOUT", "1800"))
 MINERU_DOWNLOAD_RETRY = int(os.getenv("MINERU_DOWNLOAD_RETRY", "3"))
 MINERU_DOWNLOAD_TIMEOUT = int(os.getenv("MINERU_DOWNLOAD_TIMEOUT", "300"))
 MINERU_DOWNLOAD_VERIFY_SSL = read_bool_env("MINERU_DOWNLOAD_VERIFY_SSL", True)
-LANGCHAIN_MINERU_TIMEOUT = int(os.getenv("LANGCHAIN_MINERU_TIMEOUT", "1200"))
-LANGCHAIN_MINERU_SPLIT_PAGES = read_bool_env("LANGCHAIN_MINERU_SPLIT_PAGES", True)
 
 
 def get_mineru_download_verify_ssl() -> bool:
-    # 下载 ZIP 前重新读取 .env，避免改完配置后只重启部分进程导致旧值残留。
-    load_dotenv(BASE_DIR / ".env", override=True)
+    # 测试或启动脚本显式设置环境变量时优先使用当前进程值。
+    if os.getenv("MINERU_DOWNLOAD_VERIFY_SSL") is not None:
+        return read_bool_env("MINERU_DOWNLOAD_VERIFY_SSL", True)
+    # 下载 ZIP 前读取 .env，避免模块导入时缓存旧值。
+    load_dotenv(BASE_DIR / ".env", override=False)
     return read_bool_env("MINERU_DOWNLOAD_VERIFY_SSL", True)
 
 
 # 数据目录与日志目录
 def ensure_project_dirs() -> None:
-    for folder in [DATA_DIR, LOG_DIR, UPLOAD_DIR, PARSED_JSON_DIR, MARKDOWN_DIR, CHUNKS_DIR, INDEX_DIR]:
+    for folder in [DATA_DIR, LOG_DIR, UPLOAD_DIR, PARSED_JSON_DIR, MARKDOWN_DIR, CHUNKS_DIR, INDEX_DIR, MEMORY_DIR]:
         folder.mkdir(parents=True, exist_ok=True)
 
 
@@ -122,5 +130,14 @@ class RetrievalConfig:
     vector_top_k: int = DEFAULT_VECTOR_TOP_K
     bm25_top_k: int = DEFAULT_BM25_TOP_K
     final_top_k: int = DEFAULT_FINAL_TOP_K
-    use_query_rewrite: bool = False
+    use_query_rewrite: bool = DEFAULT_USE_QUERY_REWRITE
+    query_rewrite_count: int = DEFAULT_QUERY_REWRITE_COUNT
+    query_rewrite_max_length: int = DEFAULT_QUERY_REWRITE_MAX_LENGTH
     use_rerank: bool = False
+
+
+# ---------------------------------------------------------------------------
+# memory_answer v2 feature flag
+# ---------------------------------------------------------------------------
+MEMORY_ANSWER_V2 = read_bool_env("MEMORY_ANSWER_V2", False)
+

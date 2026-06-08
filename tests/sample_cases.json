@@ -1,17 +1,15 @@
 [
   {
-    "user_input": "QY-320 显示 E03，出水变慢，买了半年",
-    "expected_fault_code": "E03",
-    "expected_product_model": "QY-320",
-    "expected_escalation": false
+    "user_input": "VoltGate VG-11KW-Pro 无法启动充电，屏幕显示 C-RCD-04",
+    "expected_charger_model": "VG-11KW-Pro",
+    "expected_fault_code": "C-RCD-04"
   },
   {
-    "user_input": "机器漏水把插座打湿了",
-    "expected_escalation": true,
-    "expected_risk_level": "high"
+    "user_input": "充电桩枪线破皮，有烧焦味",
+    "expected_risk_level": "p1_high"
   },
   {
-    "user_input": "买了一年半还能免费维修吗？",
-    "expected_intent": "warranty_consultation"
+    "user_input": "VG-CloudMini APP 离线，昨天开始连不上",
+    "expected_intent": "fault_diagnosis"
   }
 ]

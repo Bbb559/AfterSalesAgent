@@ -1,0 +1,150 @@
+[
+  {
+    "id": "eval_mem_001",
+    "scenario": "品牌和功率召回",
+    "type": "parse_only",
+    "input": "刚才我说的是什么品牌和功率？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["brand", "rated_power_kw"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "note": "target_fields 用 set 比较，顺序无关。用户同时问两个字段，LLM 应全部选中。"
+  },
+  {
+    "id": "eval_mem_002",
+    "scenario": "型号召回",
+    "type": "parse_only",
+    "input": "刚才那个型号是什么？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["charger_model"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "note": "\"那个型号\" 指代上一轮提到的型号，LLM 应识别为 charger_model 召回。"
+  },
+  {
+    "id": "eval_mem_003",
+    "scenario": "城市召回",
+    "type": "parse_only",
+    "input": "刚才城市是哪里？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["city"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "note": "\"城市是哪里\" 应识别为 city 召回。"
+  },
+  {
+    "id": "eval_mem_004",
+    "scenario": "缺失信息召回",
+    "type": "parse_only",
+    "input": "现在还缺哪些信息？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["missing_info"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "summary"
+    },
+    "note": "\"还缺哪些\" 是汇总性询问，answer_style 应为 summary。"
+  },
+  {
+    "id": "eval_mem_005",
+    "scenario": "风险等级召回",
+    "type": "parse_only",
+    "input": "刚才风险高不高？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["risk_level"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "note": "\"风险高不高\" 口语化问法，应识别为 risk_level 召回。"
+  },
+  {
+    "id": "eval_mem_006",
+    "scenario": "工单优先级召回",
+    "type": "parse_only",
+    "input": "上个工单优先级是什么？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["ticket_priority"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "note": "\"上个工单\" + \"优先级\" 应识别为 ticket_priority 召回。"
+  },
+  {
+    "id": "eval_mem_007",
+    "scenario": "最近用户原话召回",
+    "type": "parse_only",
+    "input": "刚才我说了什么？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["last_user_message"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "note": "\"我说了什么\" 是典型的 last_user_message 召回。"
+  },
+  {
+    "id": "eval_mem_008",
+    "scenario": "跨会话查询（query_scope 识别）",
+    "type": "parse_only",
+    "input": "上次那个型号还能查到吗？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["charger_model"],
+      "query_scope": "session",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "note": "\"上次那个\" 暗示可能跨轮次，query_scope 至少为 session。系统行为测试：新会话（无历史 last_case）时 resolver 应返回 low 置信度，不得跨会话读取其他 session 的数据。"
+  },
+  {
+    "id": "eval_mem_009",
+    "scenario": "字段不存在时的明确提示",
+    "type": "system_behavior",
+    "input": "刚才那个充电桩的序列号是多少？",
+    "expected": {
+      "is_memory_query": true,
+      "target_fields": ["serial_number"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "note": "系统行为：当 resolver 在 last_case 中找不到 serial_number 值时，LLM 生成回答必须明确提示\"当前会话记忆中没有找到 serial_number，需要你补充\"，不得泛化回答\"我记得你之前提过充电桩问题\"。"
+  },
+  {
+    "id": "eval_mem_010",
+    "scenario": "LLM 输出非法 target_fields 时丢弃并 warning",
+    "type": "validation",
+    "input": null,
+    "mock_llm_output": {
+      "is_memory_query": true,
+      "target_fields": ["brand", "user_name", "charger_model", "phone_number", "city"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "expected_after_clean": {
+      "is_memory_query": true,
+      "target_fields": ["brand", "charger_model", "city"],
+      "query_scope": "recent",
+      "entities": [],
+      "answer_style": "precise"
+    },
+    "expected_illegal_fields": ["user_name", "phone_number"],
+    "note": "验证 MemoryQueryResult.clean_fields() 丢弃非法字段、validate_fields() 返回非法字段列表。非法字段不进入 resolver。同时验证：query_scope 和 answer_style 即使非法也会被 normalize 为默认值。"
+  }
+]

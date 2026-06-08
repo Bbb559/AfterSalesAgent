@@ -1,50 +1,54 @@
 from __future__ import annotations
 
+from typing import Any
 
-class IntentAgent:
-    """将售后请求分类为少数几种业务意图."""
+from backend.agents.llm_utils import invoke_json
+from backend.prompts.intent import CHARGER_TRIAGE_PROMPT
+from backend.schemas import TriageResult
 
-    INTENTS = {
-        "diagnosis": ["故障", "报错", "故障码", "显示", "不出水", "出水慢", "漏水", "异常", "维修"], # 诊断相关的关键词
-        "warranty_consultation": ["质保", "保修", "在保", "过保", "收费", "免费", "费用"], # 质保咨询相关的关键词
-        "ticket_creation": ["工单", "派单", "上门", "维修单", "安排师傅"], # 工单创建相关的关键词
-        "knowledge_lookup": ["是什么", "怎么用", "多久", "说明", "政策", "流程", "标准"], # 知识查询相关的关键词
-        "human_handoff": ["人工", "主管", "投诉", "升级", "紧急"], # 人工转接相关的关键词
+
+class ChargerTriageAgent:
+    """使用 LLM 优先的 JSON 链识别充电桩安全分诊意图。"""
+
+    VALID_INTENTS = {
+        "safety_emergency", # 有效意图
+        "fault_diagnosis", # 故障诊断
+        "warranty_consultation", # 保修咨询
+        "service_dispatch", # 服务派遣
+        "usage_or_policy_lookup", # 使用或政策查询
+        "human_handoff", # 人工转接
+        "unknown", # 未知意图
     }
+    VALID_CONFIDENCE = {"high", "medium", "low"}
 
-    def determine_intent(self, text: str) -> dict:
+    def __init__(self, llm: Any | None = None) -> None:
+        self.llm = llm
+
+    def triage(self, text: str) -> dict[str, Any]:
         normalized = (text or "").strip()
         if not normalized:
-            return {"name": "unknown", "confidence": "low", "matched_keywords": []}
+            return self._result("unknown", "low", "客户未提供充电桩售后问题。")
 
-        scores = {
-            intent: sum(1 for keyword in keywords if keyword in normalized)
-            for intent, keywords in self.INTENTS.items()
-        }
-        matched = {
-            intent: [keyword for keyword in keywords if keyword in normalized]
-            for intent, keywords in self.INTENTS.items()
-        }
+        llm_result = invoke_json(self.llm, CHARGER_TRIAGE_PROMPT, {"user_input": normalized})
+        if llm_result:
+            return self._normalize_llm_result(llm_result, normalized)
 
-        strong_diagnosis_keywords = ["故障", "报错", "故障码", "显示", "不出水", "出水慢", "漏水", "异常"]
+        return self._fallback_triage(normalized)
 
-        if scores["human_handoff"] > 0:
-            name = "human_handoff"
-        elif scores["ticket_creation"] > 0 and (scores["diagnosis"] > 0 or "上门" in normalized):
-            name = "ticket_creation"
-        elif scores["warranty_consultation"] > 0:
-            name = "warranty_consultation"
-        elif any(keyword in normalized for keyword in strong_diagnosis_keywords):
-            name = "diagnosis"
-        elif scores["diagnosis"] > 0:
-            name = "diagnosis"
-        elif scores["knowledge_lookup"] > 0:
-            name = "knowledge_lookup"
-        else:
-            name = "knowledge_lookup"
+    def _normalize_llm_result(self, payload: dict[str, Any], text: str) -> dict[str, Any]:
+        intent = str(payload.get("intent") or payload.get("name") or "").strip()
+        if intent not in self.VALID_INTENTS:
+            return self._fallback_triage(text)
 
-        return {
-            "name": name,
-            "confidence": "high" if scores.get(name, 0) > 0 else "medium",
-            "matched_keywords": matched.get(name, []),
-        }
+        confidence = str(payload.get("confidence") or "medium").strip().lower()
+        if confidence not in self.VALID_CONFIDENCE:
+            confidence = "medium"
+
+        reason = str(payload.get("reason") or "").strip()
+        return self._result(intent, confidence, reason)
+
+    def _fallback_triage(self, text: str) -> dict[str, Any]:
+        return self._result("unknown", "low", "LLM 不可用，未做本地业务语义推断。")
+
+    def _result(self, intent: str, confidence: str, reason: str = "") -> dict[str, Any]:
+        return TriageResult(intent=intent, confidence=confidence, reason=reason).to_dict()

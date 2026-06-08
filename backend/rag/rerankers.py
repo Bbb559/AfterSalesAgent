@@ -5,7 +5,12 @@ import re
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from backend.config import DASHSCOPE_BASE_URL, DEFAULT_CHAT_MODEL
+from backend.config import (
+    DASHSCOPE_BASE_URL,
+    DEFAULT_CHAT_MODEL,
+    DEFAULT_QUERY_REWRITE_COUNT,
+    DEFAULT_QUERY_REWRITE_MAX_LENGTH,
+)
 from backend.rag.prompts import build_query_rewrite_prompt, build_rerank_prompt
 from backend.rag.retrievers import reciprocal_rank_fusion
 
@@ -40,25 +45,37 @@ def get_completion(prompt, model=DEFAULT_CHAT_MODEL):
     return response.choices[0].message.content
 
 
-def rewrite_query(question):
+def rewrite_query(
+    question,
+    rewrite_count=DEFAULT_QUERY_REWRITE_COUNT,
+    max_query_length=DEFAULT_QUERY_REWRITE_MAX_LENGTH,
+    completion_func=None,
+):
     """返回原始问题和改写后的检索查询。"""
-    prompt = build_query_rewrite_prompt(question)
-    content = get_completion(prompt)
-
     try:
+        prompt = build_query_rewrite_prompt(question, rewrite_count=rewrite_count)
+        content = (completion_func or get_completion)(prompt)
         rewritten = _extract_json(content)
         if isinstance(rewritten, list):
-            queries = [question]
-            queries.extend([item.strip() for item in rewritten if isinstance(item, str) and item.strip()])
-            return _dedupe_strings(queries)
+            return normalize_rewritten_queries(
+                question,
+                rewritten,
+                rewrite_count=rewrite_count,
+                max_query_length=max_query_length,
+            )
     except Exception:
         pass
 
-    return [question]
+    return normalize_rewritten_queries(
+        question,
+        [],
+        rewrite_count=rewrite_count,
+        max_query_length=max_query_length,
+    )
 
 
 def rerank_with_llm(query, chunks, top_n=5):
-    """用 LLM 对检索到的 chunks 重新打分排序。
+    """用 LLM 对检索到的文本块重新打分排序。
 
     如果 LLM 返回 JSON 解析失败，就回退到原始检索顺序。
     """
@@ -136,6 +153,27 @@ def retrieve_with_query_rewrite(
         result_groups.append(results)
 
     return reciprocal_rank_fusion(result_groups, final_top_k=final_top_k)
+
+
+def normalize_rewritten_queries(question, rewritten, rewrite_count=3, max_query_length=200):
+    """按原始查询优先的顺序清洗、截断、去重并限制改写数量。"""
+    original = _truncate_query(str(question or "").strip(), max_query_length)
+    queries = [original] if original else []
+
+    for item in rewritten or []:
+        if not isinstance(item, str):
+            continue
+        query = _truncate_query(item.strip(), max_query_length)
+        if query:
+            queries.append(query)
+
+    deduped = _dedupe_strings(queries)
+    return deduped[: max(1, int(rewrite_count) + 1)]
+
+
+def _truncate_query(query, max_query_length=200):
+    max_length = max(1, int(max_query_length or 200))
+    return query[:max_length]
 
 
 def _extract_json(content):

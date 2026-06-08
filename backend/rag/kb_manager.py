@@ -15,8 +15,11 @@ from backend.config import (
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CHUNK_SIZE,
     DEFAULT_FINAL_TOP_K,
+    DEFAULT_QUERY_REWRITE_COUNT,
+    DEFAULT_QUERY_REWRITE_MAX_LENGTH,
     DEFAULT_PARSER,
     DEFAULT_SPLITTER,
+    DEFAULT_USE_QUERY_REWRITE,
     DEFAULT_VECTOR_TOP_K,
     INDEX_DIR,
     MARKDOWN_DIR,
@@ -57,6 +60,7 @@ class KnowledgeBaseManager:
         vector_store_factory: Callable[[], Any] | None = None,
         bm25_factory: Callable[[], Any] | None = None,
         parser_func: Callable[..., list[dict[str, Any]]] | None = None,
+        query_rewriter: Callable[..., list[str]] | None = None,
     ) -> None:
         self.index_dir = Path(index_dir)
         self.chunks_dir = Path(chunks_dir)
@@ -65,6 +69,7 @@ class KnowledgeBaseManager:
         self.vector_store_factory = vector_store_factory
         self.bm25_factory = bm25_factory
         self.parser_func = parser_func
+        self.query_rewriter = query_rewriter
         self.vector_store: Any | None = None
         self.bm25_retriever: Any | None = None
         self.current_database_id = ""
@@ -141,7 +146,7 @@ class KnowledgeBaseManager:
         display_name: str = "",
         doc_type: str = "",
         product_line: str = "",
-        product_model: str = "",
+        item_identifier: str = "",
         version: str = "",
     ) -> dict[str, Any]:
         try:
@@ -169,7 +174,7 @@ class KnowledgeBaseManager:
             for page in cleaned_pages:
                 page["doc_type"] = doc_type
                 page["product_line"] = product_line
-                page["product_model"] = product_model
+                page["item_identifier"] = item_identifier
                 page["version"] = version
 
             digit_health = analyze_digit_health(cleaned_pages)
@@ -199,7 +204,7 @@ class KnowledgeBaseManager:
                 chunk_count=len(chunks),
                 doc_type=doc_type,
                 product_line=product_line,
-                product_model=product_model,
+                item_identifier=item_identifier,
                 version=version,
                 digit_health=digit_health,
             )
@@ -277,36 +282,48 @@ class KnowledgeBaseManager:
         vector_top_k = int(options.get("vector_top_k", DEFAULT_VECTOR_TOP_K))
         bm25_top_k = int(options.get("bm25_top_k", DEFAULT_BM25_TOP_K))
         final_top_k = int(options.get("final_top_k", DEFAULT_FINAL_TOP_K))
+        queries, rewrite_trace = self._prepare_retrieval_queries(question, options)
         trace = {
             "mode": retrieval_mode,
-            "queries": [question],
+            "queries": queries,
             "database_id": self.current_database_id,
+            "query_rewrite": rewrite_trace,
             "vector_results": [],
             "bm25_results": [],
             "before_rerank": [],
         }
 
         if retrieval_mode == "vector":
-            results = self.vector_store.search(question, top_k=final_top_k)
-            trace["vector_results"].append({"query": question, "results": results})
+            result_groups = []
+            for query in queries:
+                results = self.vector_store.search(query, top_k=vector_top_k)
+                trace["vector_results"].append({"query": query, "results": results})
+                result_groups.append(results)
+            results = self._reciprocal_rank_fusion(result_groups, final_top_k=final_top_k)
             trace["before_rerank"] = results
             return results, trace
 
         if retrieval_mode == "bm25":
             if self.bm25_retriever is None:
                 return [], {**trace, "error": "BM25 索引未加载。"}
-            results = self.bm25_retriever.search(question, top_k=final_top_k)
-            trace["bm25_results"].append({"query": question, "results": results})
+            result_groups = []
+            for query in queries:
+                results = self.bm25_retriever.search(query, top_k=bm25_top_k)
+                trace["bm25_results"].append({"query": query, "results": results})
+                result_groups.append(results)
+            results = self._reciprocal_rank_fusion(result_groups, final_top_k=final_top_k)
             trace["before_rerank"] = results
             return results, trace
 
-        vector_results = self.vector_store.search(question, top_k=vector_top_k)
-        trace["vector_results"].append({"query": question, "results": vector_results})
-        result_groups = [vector_results]
-        if self.bm25_retriever is not None:
-            bm25_results = self.bm25_retriever.search(question, top_k=bm25_top_k)
-            trace["bm25_results"].append({"query": question, "results": bm25_results})
-            result_groups.append(bm25_results)
+        result_groups = []
+        for query in queries:
+            vector_results = self.vector_store.search(query, top_k=vector_top_k)
+            trace["vector_results"].append({"query": query, "results": vector_results})
+            result_groups.append(vector_results)
+            if self.bm25_retriever is not None:
+                bm25_results = self.bm25_retriever.search(query, top_k=bm25_top_k)
+                trace["bm25_results"].append({"query": query, "results": bm25_results})
+                result_groups.append(bm25_results)
 
         results = self._reciprocal_rank_fusion(result_groups, final_top_k=final_top_k)
         trace["before_rerank"] = results
@@ -345,7 +362,7 @@ class KnowledgeBaseManager:
         chunk_count: int,
         doc_type: str,
         product_line: str,
-        product_model: str,
+        item_identifier: str,
         version: str,
         digit_health: dict[str, Any],
     ) -> dict[str, Any]:
@@ -360,7 +377,7 @@ class KnowledgeBaseManager:
             "chunk_count": chunk_count,
             "doc_type": doc_type,
             "product_line": product_line,
-            "product_model": product_model,
+            "item_identifier": item_identifier,
             "version": version,
             "digit_health": digit_health,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -378,7 +395,7 @@ class KnowledgeBaseManager:
         file_names: list[str],
     ) -> str:
         label = f"{metadata.get('display_name') or database_id} | {metadata.get('chunk_count', chunk_count)} chunks"
-        for key in ["parser", "doc_type", "product_model"]:
+        for key in ["parser", "doc_type", "item_identifier"]:
             value = metadata.get(key)
             if value:
                 label += f" | {value}"
@@ -434,6 +451,65 @@ class KnowledgeBaseManager:
         from backend.rag.parsers import parse_pdfs
 
         return parse_pdfs
+
+    def _prepare_retrieval_queries(self, question: str, options: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
+        original_query = str(question or "").strip()
+        rewrite_count = max(0, int(options.get("query_rewrite_count", DEFAULT_QUERY_REWRITE_COUNT)))
+        max_length = max(1, int(options.get("query_rewrite_max_length", DEFAULT_QUERY_REWRITE_MAX_LENGTH)))
+        enabled = bool(options.get("use_query_rewrite", DEFAULT_USE_QUERY_REWRITE))
+        base_trace = {
+            "enabled": enabled,
+            "original_query": original_query,
+            "requested_rewrite_count": rewrite_count,
+            "max_query_length": max_length,
+            "rewritten_queries": [],
+            "error": "",
+        }
+
+        if not enabled or rewrite_count <= 0:
+            return [original_query[:max_length]], base_trace
+
+        try:
+            rewriter = self.query_rewriter or self._load_default_query_rewriter()
+            queries = rewriter(
+                original_query,
+                rewrite_count=rewrite_count,
+                max_query_length=max_length,
+            )
+            normalized = self._normalize_retrieval_queries(original_query, queries, rewrite_count, max_length)
+            base_trace["rewritten_queries"] = normalized[1:]
+            return normalized, base_trace
+        except Exception as exc:
+            base_trace["error"] = str(exc)
+            return [original_query[:max_length]], base_trace
+
+    def _normalize_retrieval_queries(
+        self,
+        original_query: str,
+        candidates: list[str],
+        rewrite_count: int,
+        max_length: int,
+    ) -> list[str]:
+        queries = [original_query[:max_length]]
+        for item in candidates or []:
+            if not isinstance(item, str):
+                continue
+            query = item.strip()[:max_length]
+            if query:
+                queries.append(query)
+
+        deduped = []
+        seen = set()
+        for query in queries:
+            if query and query not in seen:
+                seen.add(query)
+                deduped.append(query)
+        return deduped[: rewrite_count + 1] or [original_query[:max_length]]
+
+    def _load_default_query_rewriter(self) -> Callable[..., list[str]]:
+        from backend.rag.rerankers import rewrite_query
+
+        return rewrite_query
 
     def _read_json(self, path: Path, default: Any) -> Any:
         if not path.exists():

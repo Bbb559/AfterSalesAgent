@@ -1,52 +1,53 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from backend.agents.llm_utils import invoke_json
+from backend.prompts.action import CHARGER_ACTION_PROMPT
+from backend.schemas import ChargerActionResult
 
-class ActionAgent:
-    """生成面向客户和内部的售后输出."""
+
+class ChargerActionAgent:
+    """生成充电桩安全诊断的客户回复和内部建议。"""
+
+    def __init__(self, llm: Any | None = None) -> None:
+        self.llm = llm
 
     def generate(
         self,
-        case: dict[str, Any], # 用户/设备信息
-        diagnosis: dict[str, Any], # 诊断结果
-        warranty: dict[str, Any], # 质保判断
-        escalation: dict[str, Any], # 升级信息
-        ticket: dict[str, Any], # 升级判断
+        case: dict[str, Any],
+        diagnosis: dict[str, Any],
+        warranty: dict[str, Any],
+        safety: dict[str, Any],
+        dispatch: dict[str, Any],
+        retrieval: dict[str, Any] | None = None,
+        triage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        customer_reply = self._customer_reply(case, diagnosis) 
-        internal_advice = self._internal_advice(diagnosis, warranty, escalation)
-
-        return {
-            "customer_reply": customer_reply,  # 客户回复
-            "internal_advice": internal_advice, # 内部建议
-            "ticket": ticket, # 工单信息
-        }
-
-    def _customer_reply(self, case: dict[str, Any], diagnosis: dict[str, Any]) -> str:
-        steps = "\n".join(f"{idx}. {step}" for idx, step in enumerate(diagnosis.get("remote_steps", []), start=1))
-        model = case.get("product_model") or "您的设备"
-        if diagnosis.get("urgency") == "high":
-            return (
-                f"您好，{model} 当前描述涉及安全风险。请您先停止使用设备，断开电源，"
-                "关闭进水阀，并避免继续触碰潮湿插座或设备内部部件。我们会优先转人工核实并安排后续处理。"
-            )
-        return (
-            f"您好，关于 {model} 的问题我们先帮您做远程排查。\n"
-            f"{steps}\n"
-            "如果以上步骤仍无法恢复，请补充设备照片、购买凭证和门店地址，我们会继续安排处理。"
+        llm_action = invoke_json(
+            self.llm,
+            CHARGER_ACTION_PROMPT,
+            {
+                "triage": json.dumps(triage or {}, ensure_ascii=False),
+                "case": json.dumps(case, ensure_ascii=False),
+                "safety": json.dumps(safety, ensure_ascii=False),
+                "diagnosis": json.dumps(diagnosis, ensure_ascii=False),
+                "warranty": json.dumps(warranty, ensure_ascii=False),
+                "dispatch": json.dumps(dispatch, ensure_ascii=False),
+                "retrieval": json.dumps(retrieval or {}, ensure_ascii=False),
+            },
         )
+        if llm_action.get("customer_reply"):
+            return ChargerActionResult(
+                customer_reply=str(llm_action.get("customer_reply", "")).strip(),
+                internal_advice=str(
+                    llm_action.get("internal_advice") or "LLM 已生成客户回复，内部建议需结合 workflow 工具结果复核。"
+                ),
+                dispatch=dispatch,
+            ).to_dict()
 
-    def _internal_advice(
-        self,
-        diagnosis: dict[str, Any], # 诊断结果
-        warranty: dict[str, Any], # 质保判断
-        escalation: dict[str, Any], # 升级判断
-    ) -> str:
-        lines = [
-            f"初步判断：{diagnosis.get('summary')}",
-            f"建议动作：{diagnosis.get('suggested_action')}",
-            f"质保判断：{warranty.get('status')}，{warranty.get('reason')}",
-            f"升级判断：{escalation.get('level')}，{escalation.get('reason')}",
-        ]
-        return "\n".join(lines)
+        return ChargerActionResult(
+            customer_reply="您好，当前智能回复生成暂不可用。我们已记录您的充电桩问题，会转人工结合安全分级、知识库依据、保修和派工信息核验后回复。",
+            internal_advice="LLM 不可用，ActionAgent 仅返回最小默认输出；安全、保修和危险动作拦截由 workflow 的 rules 层处理。",
+            dispatch=dispatch,
+        ).to_dict()

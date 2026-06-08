@@ -10,8 +10,19 @@ data/indexes/
 data/chunks/
 data/parsed_json/
 data/markdown/
+data/memory/
+data/run_logs/
+data/mineru_results/
 logs/
+
+# 私密文档与缓存
+Document_pdfs/
+.npm-cache/
+uvicorn
 *.log
 
 .pytest_cache/
 .ruff_cache/
+
+frontend/node_modules/
+frontend/dist/

@@ -110,7 +110,7 @@ frontend/src/api.test.ts
 * 提供 RAG 检索测试页
 * 查看系统状态
 
-前端刻意不渲染完整 `trace`、`tool_history`、RAG 原始 chunk，以避免页面卡顿或内存占用过大。完整调试信息写入后端：
+前端主工作台不展示长期记忆管理面板。Memory 调试通过后端只读 API（`GET /api/memory/sessions/...`）、`debug_log`（`data/run_logs/{run_id}.json`）和 SQLite 直查完成。前端刻意不渲染完整 `trace`、`tool_history`、RAG 原始 chunk，以避免页面卡顿或内存占用过大。完整调试信息写入后端：
 
 ```text
 data/run_logs/{run_id}.json
@@ -531,6 +531,52 @@ SQLite FTS5 只索引 Session messages，用于当前会话消息搜索。
 * 不作为 RAG 知识库
 * 不作为诊断依据
 
+#### 3. SQLite 长期记忆双写（阶段 2-4）
+
+自阶段 2 起，每次 workflow 完成后，MemoryManager 会将 session / messages / case / ticket / summary 同步写入 SQLite（`data/memory/long_term.sqlite`）。写入通过 feature flag 控制：
+
+```bash
+# .env
+MEMORY_SQLITE_DUAL_WRITE=true   # 默认开启
+```
+
+SQLite 写入失败不阻塞主流程，trace 中记录 `memory_sqlite` 节点状态。
+
+阶段 4 提供了只读调试 API：
+- `GET /api/memory/sessions/{session_id}` — 查询 session 详情
+- `GET /api/memory/sessions/{session_id}/messages?limit=N` — 查询消息列表
+
+阶段 3（灰度中）通过 `MEMORY_READ_FROM_SQLITE=true` 可切换主读路径：
+```bash
+# .env
+MEMORY_READ_FROM_SQLITE=false  # 默认关闭，保持 JSON 主读
+```
+开启后 `recall_context()` 优先从 SQLite 读取 session/case/ticket 维度数据，失败时静默回退 JSON。Customer/Charger/Site 维度仍走 JSON。
+
+### 2.12 长期记忆使用边界
+
+长期记忆不追求“无限记住用户”，而是作为**售后服务连续性、重复报修追踪、工单上下文补全和调试可观测性的轻量辅助层**。当前输入、RAG 知识库和安全诊断链路仍然是主判断来源。
+
+#### 设计原则
+
+1. **诊断层隔离**：诊断层不把长期记忆作为故障判断证据。真正的诊断依据来自当前输入和 RAG 知识库。
+2. **action / ticket / customer_reply 层可用**：生成客户回复、工单和回复草稿时，可以读取历史派工状态、上次缺失信息、上次回复，用于服务连续性。
+3. **session 过期只标记不删除**：过期 session 只标记 `expired`，再标记 `archived`，不直接物理删除。
+4. **TTL 三层配置化**：
+   - `MEMORY_SESSION_EXPIRE_AFTER_DAYS`（默认 7 天）— 无活动 → expired
+   - `MEMORY_SESSION_ARCHIVE_AFTER_DAYS`（默认 30 天）— expired → archived
+   - `MEMORY_SESSION_CLEANUP_AFTER_DAYS`（默认 14 天）— 清理窗口配置，本阶段不执行删除
+5. **FTS5 当前 session 搜索**：当前 session 的 FTS5 搜索在 recall_context 中自动执行。跨 session 搜索必须显式触发，不允许自动污染当前诊断。
+6. **JSON 是 Source of Truth**：当前默认 JSON 仍是主读路径，SQLite 做双写和调试查询。阶段 3 通过 `MEMORY_READ_FROM_SQLITE=true` 可切换 SQLite 优先读取 session/case/ticket 维度（失败时回退 JSON），灰度验证中。
+
+#### 暂不做的方向
+
+- 跨 session 自动召回
+- LLM 长期摘要
+- 客户/设备/现场复杂画像
+- 记忆编辑后台
+- SQLite 替代 JSON 主读（阶段 3 通过 feature flag 灰度验证中，尚未切换默认）
+
 ---
 
 ## 3. 目录结构
@@ -648,7 +694,18 @@ MINERU_API_TOKEN=
 MINERU_DOWNLOAD_VERIFY_SSL=true
 
 # 功能开关
-MEMORY_ANSWER_V2=false   # 设为 true 开启 LLM 驱动记忆精确问答（v2）
+MEMORY_ANSWER_V2=true   # 设为 true 开启 LLM 驱动记忆精确问答（v2，默认关闭）
+
+# 长期记忆 SQLite 双写
+MEMORY_SQLITE_DUAL_WRITE=true   # 设为 true 开启 SQLite 双写和调试 API（默认开启）
+
+# SQLite 主读（阶段 3 — 验证中，默认关闭）
+MEMORY_READ_FROM_SQLITE=false   # true → recall_context() 优先从 SQLite 读取，失败时回退 JSON
+
+# Session TTL 配置（天数）
+MEMORY_SESSION_EXPIRE_AFTER_DAYS=7    # active → expired 天数
+MEMORY_SESSION_ARCHIVE_AFTER_DAYS=30  # expired → archived 天数
+MEMORY_SESSION_CLEANUP_AFTER_DAYS=14  # archived 后清理窗口（本阶段不执行删除）
 ```
 
 如果没有配置 LLM key，流程不会直接崩溃，会退回到本地 rules、tools 和 RAG 的兜底逻辑。
@@ -1074,6 +1131,55 @@ python tests/eval/test_memory_parse.py   # 56 条全部通过
 
 关闭 `MEMORY_ANSWER_V2=false`（默认）时，旧链路（`_memory_query_type` / `_build_memory_reply`）行为不变，所有旧函数标记 `[deprecated]`。
 
+#### 11.2.8 入口判断增强（上下文追问 gate）✅ 已完成
+
+**问题**：无显式标记的自然追问（如 "VG-11KW-Pro 是多少功率？"）因不含 "刚才/之前" 等关键词，被 `_is_memory_recall_query()` 硬编码关键词匹配阻挡，无法进入 memory_answer。
+
+**解决方案**：在硬编码关键词 guard 之后新增 **确定性二次入口判断**（不调 LLM，0 token），放行「上下文追问」类的短输入进入 `_parse_memory_query()` 由 LLM 精细判断。LLM 判断非记忆查询时自动回退主诊断链路。
+
+**新增 3 个方法**（[graph_workflow.py](backend/graph_workflow.py)）：
+
+| 方法 | 职责 |
+|------|------|
+| `_maybe_contextual_memory_query()` | 确定性二次 gate：session 有上下文 + 输入 < 50 字符 + 含实体/追问标记，全部满足才放行 |
+| `_extract_recent_entities()` | 从 SessionMemory.last_case 提取 charger_model / brand / serial_number / city / fault_codes |
+| `_build_session_context_for_parse()` | 构建传给 LLM prompt 的上下文文本（最近消息、案例字段、缺失信息等） |
+
+**修改 4 个方法 + 1 个 Prompt**：
+
+| 位置 | 改动 |
+|------|------|
+| `run()` | 集成二次 gate，`_run_memory_answer` 返回 None → 回退主诊断链路 |
+| `_parse_memory_query()` | 接收 `session_context` 参数，LLM 基于上下文判断实体是否匹配 |
+| `_memory_answer_node()` | `is_memory_query=false` 且无 fallback → 设 `memory_answer_rejected`，提前返回 |
+| `_run_memory_answer()` | 检查 rejected 标记 → 返回 None 通知 `run()` 回退 |
+| `MEMORY_QUERY_PARSE_PROMPT` | 新增 `{session_context}` 变量 + 实体匹配判断规则 + 示例 6（上下文追问）/ 示例 7（安全短句不进 memory） |
+
+**调用链**：
+
+```
+run()
+├── _is_memory_recall_query()              ← 关键词 guard (不变)
+├── _maybe_contextual_memory_query()       ← NEW 确定性 gate (0 token)
+│   ├── session 有上下文 (messages + last_case)?
+│   ├── 输入 < 50 字符?
+│   └── 包含上一轮实体 OR 上下文追问标记?
+├── _run_memory_answer()
+│   └── _parse_memory_query(session_context) ← 现在传入上下文
+│       ├── is_memory_query=true  → 正常 memory_answer
+│       └── is_memory_query=false → state["memory_answer_rejected"]=True
+└── should_try_memory=False 或 rejected?
+    └── 回退主诊断链路 (RAG + Agents)
+```
+
+**安全策略**：
+
+- "现在又跳闸了怎么办？"/"漏保又跳了" 等安全/诊断短句由 LLM + Prompt 规则确保不进 memory_answer
+- LLM rejected 时自动回退主链路，不返回空
+- 新 session（无上下文）不会误入 memory
+
+**测试覆盖**：新增 11 个测试用例（[test_graph_workflow.py](tests/test_graph_workflow.py)），覆盖实体追问 / marker 追问 / 空 session / 长输入 / 安全短句不被抢走 / LLM reject 回退主链路全场景。全量测试 89 passed。
+
 ---
 
 ### 11.3 Case 抽取与记忆写入稳定性
@@ -1221,7 +1327,7 @@ python tests/eval/test_memory_parse.py   # 56 条全部通过
 当前 React 前端已经替代 Gradio，后续可继续增强：
 
 1. 增加完整 run log 查看页
-   当前只显示 debug_log_path，后续仍以服务端日志文件和本地 logs 目录保存为主，不计划在前端直接展示完整日志内容，避免暴露内部 trace、tool history 和大体积调试信息。
+   当前只显示 `debug_log_path`，后续仍以服务端日志文件和本地 logs 目录保存为主，不计划在前端直接展示完整日志内容，避免暴露内部 trace、tool history 和大体积调试信息。
 
 2. 增加节点详情弹窗
    点击节点后查看：
@@ -1364,7 +1470,7 @@ React 前端
 | memory_answer v2 | ✅ 完成 | parse → resolve（结构化+FTS5）→ answer LLM，56 条测试，feature flag 控制 |
 | 会话记忆 + FTS5 | ✅ 完成 | SessionMemory + SessionSearchIndex（SQLite FTS5）+ MemoryManager |
 | 安全护栏 | ✅ 完成 | safety_rules.py / input_rules.py / output_rules.py / case_rules.py |
-| React 前端 | ✅ 完成 | 安全诊断工作台，RunLog 查看，知识库构建，系统状态 |
+| React 前端 | ✅ 完成 | 安全诊断工作台，知识库构建，RAG 检索，系统状态 |
 | FastAPI 后端 | ✅ 完成 | 同步 + 流式 SSE 接口，CORS |
 | RAG 知识库 | ✅ 完成 | FAISS + BM25 + RRF 混合检索，pypdf / MinerU 双解析器 |
 | Gradio 旧版入口 | 🟡 保留 | gradio_app.py 作为备用 |

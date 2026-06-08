@@ -127,6 +127,7 @@ function AgentPanel({
   const [error, setError] = useState("");
   const [sessionNotice, setSessionNotice] = useState("");
   const pollCancelled = useRef(false);
+  const sessionRef = useRef(sessionId);
 
   useEffect(() => {
     if (sessionId) {
@@ -136,14 +137,10 @@ function AgentPanel({
     }
   }, [sessionId]);
 
+  // 保持 ref 与 state 同步，避免异步回调中的过期闭包
   useEffect(() => {
-    if (!backendSessionPattern.test(sessionId)) {
-      void createNewSession("已创建新的后端会话。");
-    }
-    return () => {
-      pollCancelled.current = true;
-    };
-  }, []);
+    sessionRef.current = sessionId;
+  }, [sessionId]);
 
   async function createNewSession(successMessage = "已新建会话。") {
     if (running) return;
@@ -170,12 +167,29 @@ function AgentPanel({
       setError("请先输入客户问题。");
       return;
     }
+
+    // 确保在调用后端前已持有有效后端 session，避免竞态导致后端每次生成新 session
+    if (!backendSessionPattern.test(sessionRef.current)) {
+      setCreatingSession(true);
+      setError("");
+      try {
+        const session = await createSession();
+        setSessionId(session.session_id);
+      } catch (err) {
+        setCreatingSession(false);
+        setError(`创建会话失败：${readableError(err)}`);
+        return;
+      } finally {
+        setCreatingSession(false);
+      }
+    }
+
     pollCancelled.current = false;
     setRunning(true);
     setError("");
     setReply("正在运行安全诊断 Agent...");
     try {
-      const started = await startAgent(question, selectedKb, retrievalMode, topK, sessionId);
+      const started = await startAgent(question, selectedKb, retrievalMode, topK, sessionRef.current);
       setSummary(started);
       await pollRun(started.run_id);
     } catch (err) {
@@ -191,7 +205,7 @@ function AgentPanel({
       if (pollCancelled.current) return;
       const data = await getRunSummary(runId);
       setSummary(data);
-      setSessionId(data.session_id || sessionId);
+      setSessionId(data.session_id || sessionRef.current);
       if (data.customer_reply) setReply(data.customer_reply);
       if (["completed", "failed", "timeout"].includes(data.status)) {
         if (data.error) setError(data.error);

@@ -5,13 +5,14 @@ import json
 import re
 import shutil
 import sqlite3
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from backend.config import MEMORY_DIR
+from backend.config import MEMORY_DIR, MEMORY_READ_FROM_SQLITE, MEMORY_SQLITE_DUAL_WRITE
 
 
 def _now() -> str:
@@ -633,6 +634,10 @@ class MemoryManager:
         self.site_memory = SiteMemory(self.memory_dir / "sites")
         self.ticket_memory = TicketMemory(self.memory_dir / "tickets")
         self.session_search = SessionSearchIndex(self.memory_dir / "session_search.sqlite")
+        self.sqlite_store = None
+        if MEMORY_SQLITE_DUAL_WRITE:
+            from backend.memory.sqlite_store import SQLiteLongTermMemoryStore
+            self.sqlite_store = SQLiteLongTermMemoryStore(self.memory_dir / "long_term.sqlite")
 
     def create_session(self, session_id: str | None = None) -> SessionMemory:
         session = SessionMemory(session_id=session_id, root=self.sessions_root)
@@ -666,6 +671,40 @@ class MemoryManager:
         customer_id = self.customer_memory.upsert_from_case(case, result)
         charger_id = self.charger_memory.upsert_from_case(case, result)
         site_id = self.site_memory.upsert_from_case(case, result)
+
+        # SQLite 双写（阶段 2）：JSON 为主，SQLite 追加写入，失败不阻塞。
+        if self.sqlite_store is not None:
+            try:
+                ticket_data = self.ticket_memory.get(ticket_id) or {}
+                messages_data = [m.to_dict() for m in session.messages]
+                sqlite_result = self.sqlite_store.write_workflow_result(
+                    session_id=session.session_id,
+                    created_at=session.created_at,
+                    updated_at=session.updated_at,
+                    messages=messages_data,
+                    case=case,
+                    ticket_id=ticket_id,
+                    ticket=ticket_data,
+                    triage=result.get("triage"),
+                    safety=result.get("safety"),
+                    diagnosis=result.get("diagnosis"),
+                )
+                result.setdefault("trace", []).append({
+                    "node": "memory_sqlite",
+                    "title": "SQLite 长期记忆双写",
+                    "status": "completed" if sqlite_result.get("success") else "warning",
+                    "output": sqlite_result,
+                    "timestamp": round(time.time(), 3),
+                })
+            except Exception as exc:
+                result.setdefault("trace", []).append({
+                    "node": "memory_sqlite",
+                    "title": "SQLite 长期记忆双写",
+                    "status": "failed",
+                    "output": {"success": False, "error": str(exc)},
+                    "timestamp": round(time.time(), 3),
+                })
+
         return {
             "session_id": session.session_id,
             "customer_id": customer_id,
@@ -675,7 +714,24 @@ class MemoryManager:
         }
 
     def recall_context(self, case: dict[str, Any] | None = None, session_id: str | None = None) -> dict[str, Any]:
-        """读取分层记忆摘要，不把记忆内容作为诊断证据。"""
+        """读取分层记忆摘要，不把记忆内容作为诊断证据。
+
+        MEMORY_READ_FROM_SQLITE=false（默认）：走 JSON 路径（现有行为不变）。
+        MEMORY_READ_FROM_SQLITE=true ：优先从 SQLite 读取 session/case/ticket 维度，
+                                     失败时回退 JSON。
+        """
+        if MEMORY_READ_FROM_SQLITE and self.sqlite_store is not None and self.sqlite_store.available:
+            try:
+                return self._recall_context_from_sqlite(case, session_id)
+            except Exception:
+                # SQLite 路径异常 → 静默回退 JSON
+                pass
+        return self._recall_context_from_json(case, session_id)
+
+    def _recall_context_from_json(
+        self, case: dict[str, Any] | None = None, session_id: str | None = None
+    ) -> dict[str, Any]:
+        """现有 JSON 路径（MEMORY_READ_FROM_SQLITE=false 时使用）。"""
         case = case or {}
         session = self.get_or_create_session(session_id)
         self.session_search.index_session(session)
@@ -743,6 +799,116 @@ class MemoryManager:
             },
         }
 
+    def _recall_context_from_sqlite(
+        self, case: dict[str, Any] | None = None, session_id: str | None = None
+    ) -> dict[str, Any]:
+        """SQLite 优先路径：从 long_term.sqlite 重建 session/case/ticket 维度。
+
+        Customer/Charger/Site 维度暂不在 SQLite 中，返回空结构（与 JSON 无记录时行为一致）。
+        失败时由调用方 recall_context() 的 try/except 回退 JSON。
+        """
+        case = case or {}
+
+        # 解析 session_id（不加载 JSON）
+        target_id = session_id or self.current_session_id
+        if not target_id:
+            target_id = _new_id("session")
+            self.current_session_id = target_id
+
+        sqlite_ctx = self.sqlite_store.build_session_context(target_id)
+        session_summary = sqlite_ctx["session"]
+
+        # Customer / Charger / Site ID（沿用 JSON key-building 逻辑）
+        customer_id = self.customer_memory._build_key(case)
+        charger_id = self.charger_memory._build_key(case)
+        site_id = self.site_memory._build_key(case)
+
+        # Customer / Charger / Site 数据 — SQLite 尚无对应表，返回 {}
+        customer: dict[str, Any] = {}
+        charger: dict[str, Any] = {}
+        site: dict[str, Any] = {}
+
+        # Session search：复用 sqlite_store 的 FTS5 搜索，适配返回格式
+        search_query = self._memory_search_query(case)
+        fts5_matches = self.sqlite_store.search_messages(search_query, session_id=target_id)
+        session_search = self._format_sqlite_fts5_result(search_query, fts5_matches)
+
+        recent_ticket = sqlite_ctx.get("recent_ticket", {})
+        last_ticket_id = sqlite_ctx.get("last_ticket_id", "")
+
+        has_customer = bool(customer)
+        has_charger = bool(charger)
+        has_site = bool(site)
+        has_ticket = bool(recent_ticket)
+
+        return {
+            "session": session_summary,
+            "last_case": session_summary.get("last_case", {}),
+            "missing_info": session_summary.get("missing_info", []),
+            "recent_safety": session_summary.get("recent_safety", {}),
+            "recent_ticket": recent_ticket,
+            "session_summary": sqlite_ctx.get("session_summary", {}),
+            "session_search": session_search,
+            "last_customer_reply": sqlite_ctx.get("last_customer_reply", ""),
+            "customer": customer,
+            "charger": charger,
+            "site": site,
+            "ticket": recent_ticket,
+            "matched_ids": {
+                "session_id": target_id,
+                "customer_id": customer_id if has_customer else "",
+                "charger_id": charger_id if has_charger else "",
+                "site_id": site_id if has_site else "",
+                "ticket_id": last_ticket_id if has_ticket else "",
+            },
+            "isolation": {
+                "scope": "session/customer/charger/site/ticket/repo",
+                "session_id": target_id,
+                "session_isolated": True,
+                "long_term_store": "sqlite",
+                "session_search_store": "sqlite_fts5",
+                "repo_knowledge_separated": True,
+                "used_as_diagnostic_evidence": False,
+                "policy": "记忆只提供历史摘要和追问上下文，诊断依据仍以当前用户输入和 RAG 知识库为准。（SQLite 主读）",
+            },
+        }
+
+    @staticmethod
+    def _format_sqlite_fts5_result(query: str, matches: list[dict[str, Any]]) -> dict[str, Any]:
+        """将 SQLiteLongTermMemoryStore.search_messages() 的返回适配为 session_search 格式。"""
+        if not matches:
+            return {
+                "available": True,
+                "query": query,
+                "matches": [],
+                "summary": "",
+                "summary_method": "sqlite_fts5_extractive",
+                "error": "",
+            }
+        formatted = []
+        snippets: list[str] = []
+        for idx, m in enumerate(matches[:5]):
+            role = str(m.get("role", "") or "")
+            content = str(m.get("content", "") or "")
+            formatted.append({
+                "session_id": str(m.get("session_id", "") or ""),
+                "role": role,
+                "content": content,
+                "timestamp": str(m.get("created_at", "") or ""),
+                "metadata": {},
+                "score": float(idx == 0),
+            })
+            if content:
+                snippets.append(f"{role}: {content[:160]}")
+        return {
+            "available": True,
+            "query": query,
+            "matches": formatted,
+            "summary": " | ".join(snippets[:3]),
+            "summary_method": "sqlite_fts5_extractive",
+            "error": "",
+        }
+
     def get_status(self) -> dict[str, Any]:
         current_session = self.sessions.get(self.current_session_id)
         return {
@@ -754,6 +920,24 @@ class MemoryManager:
             "sites": self.site_memory.get_status(),
             "tickets": self.ticket_memory.get_status(),
         }
+
+    def enforce_session_ttl(self) -> dict[str, Any]:
+        """手动触发 session TTL 标记（不自动，不接 workflow）。
+
+        将过期的 active session 标记为 expired，
+        将过期的 expired session 标记为 archived。
+        不执行物理删除。
+        """
+        if self.sqlite_store is None:
+            return {"expired": 0, "archived": 0, "error": "SQLite 未启用"}
+        from backend.config import (
+            MEMORY_SESSION_EXPIRE_AFTER_DAYS,
+            MEMORY_SESSION_ARCHIVE_AFTER_DAYS,
+        )
+        return self.sqlite_store.mark_expired_sessions(
+            expire_days=MEMORY_SESSION_EXPIRE_AFTER_DAYS,
+            archive_days=MEMORY_SESSION_ARCHIVE_AFTER_DAYS,
+        )
 
     def _session_summary(self, session: SessionMemory) -> dict[str, Any]:
         recent_user_messages = [

@@ -120,13 +120,24 @@ class ChargerDiagnosisWorkflow:
         if active_memory is not None:
             active_session_id = active_memory.get_or_create_session(session_id).session_id
 
-        if self._is_memory_recall_query(user_input):
-            return self._run_memory_answer(
+        # 第一层：显式记忆标记（"刚才/之前/还记得"等关键词）→ 直接 memory_answer
+        should_try_memory = self._is_memory_recall_query(user_input)
+        # 第二层：确定性上下文追问 gate（不调 LLM）
+        if not should_try_memory and active_memory is not None:
+            should_try_memory = self._maybe_contextual_memory_query(
+                user_input or "", active_memory, active_session_id
+            )
+
+        if should_try_memory:
+            result = self._run_memory_answer(
                 user_input=user_input or "",
                 session_id=active_session_id,
                 memory_manager=active_memory,
                 progress_callback=progress_callback,
             )
+            if result is not None:
+                return result
+            # result is None → LLM 判断非 memory_query → 回退主诊断链路
 
         state: ChargerDiagnosisGraphState = {
             "user_input": user_input or "",
@@ -183,6 +194,11 @@ class ChargerDiagnosisWorkflow:
         self._input_guard_node(state)
         self._memory_context_node(state)
         self._memory_answer_node(state)
+
+        # LLM 判断非 memory_query → 返回 None 通知 run() 回退主诊断链路
+        if state.get("memory_answer_rejected"):
+            return None  # type: ignore[return-value]
+
         self._final_node(state)
         return state.get("result") or self._build_result(state)
 
@@ -197,6 +213,18 @@ class ChargerDiagnosisWorkflow:
         if config.MEMORY_ANSWER_V2:
             # 阶段 1: LLM 解析查询意图
             parsed = self._parse_memory_query(user_input, state)
+
+            # LLM 明确判断非记忆查询 → 标记 rejected 回退主诊断链路
+            if not parsed.is_memory_query and not parsed.fallback_reason:
+                self._add_trace(
+                    state, "memory_answer", "非记忆查询",
+                    "warning",
+                    {"user_input": user_input},
+                    {"note": "LLM 判断 is_memory_query=false，回退到主诊断链路。",
+                     "parse_result": parsed.to_dict()},
+                )
+                state["memory_answer_rejected"] = True
+                return state
 
             # 阶段 2: field resolver v1 从结构化来源取值
             resolution = self._resolve_memory_fields(parsed, memory_context, user_input, state)
@@ -796,9 +824,109 @@ class ChargerDiagnosisWorkflow:
             return "last_user_message"
         return "unknown"
 
+    @staticmethod
+    def _extract_recent_entities(session: Any) -> list[str]:
+        """从 SessionMemory 提取上一轮实体值（确定性，不调 LLM）。"""
+        entities: list[str] = []
+        if session is None:
+            return entities
+        last_case = (getattr(session, "context", None) or {}).get("last_case") or {}
+        for key in ("charger_model", "brand", "serial_number", "city"):
+            val = str(last_case.get(key, "")).strip()
+            if len(val) >= 2:
+                entities.append(val)
+        for code in last_case.get("fault_codes") or []:
+            code = str(code).strip()
+            if len(code) >= 2:
+                entities.append(code)
+        return entities
+
+    def _maybe_contextual_memory_query(
+        self, user_input: str, memory_manager: Any, session_id: str
+    ) -> bool:
+        """确定性二次判断：session 有上下文 & 输入短 & 可能为上下文追问。
+
+        不调 LLM。仅判断"是否值得交给 _parse_memory_query 做 LLM 精细解析"。
+        """
+        compact = str(user_input or "").strip()
+        if not compact:
+            return False
+
+        # 条件 1：session 有上下文
+        session = getattr(memory_manager, "sessions", {}).get(session_id)
+        if session is None:
+            return False
+        messages = getattr(session, "messages", []) or []
+        if len(messages) == 0:
+            return False
+        last_case = (getattr(session, "context", None) or {}).get("last_case") or {}
+        if not last_case:
+            return False
+
+        # 条件 2：用户输入较短（正常诊断输入通常 > 50 字符）
+        if len(compact) >= 50:
+            return False
+
+        # 条件 3：包含上一轮实体 或 上下文追问标记
+        entities = self._extract_recent_entities(session)
+        lower_input = compact.lower()
+        for entity in entities:
+            if entity.lower() in lower_input:
+                return True
+
+        # 上下文追问标记（不含"漏保/跳闸/故障码"，它们需要实体命中才能进入）
+        context_markers = [
+            "这个", "那个", "它", "该",
+            "多少功率", "功率是多少",
+            "什么型号", "哪个型号",
+            "还缺", "缺什么",
+            "优先级", "风险等级", "工单",
+        ]
+        if any(marker in compact for marker in context_markers):
+            return True
+
+        return False
+
     # ------------------------------------------------------------------
     # memory_answer v2：LLM 驱动的记忆查询解析
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_session_context_for_parse(state: ChargerDiagnosisGraphState) -> str:
+        """从 memory_context 构建轻量 session context 文本，供 parse LLM 使用。"""
+        mem = state.get("memory_context") or {}
+        lines: list[str] = []
+
+        session = mem.get("session") or {}
+        recent_msgs = session.get("recent_user_messages") or []
+        if recent_msgs:
+            lines.append(f"- 最近用户消息：{json.dumps(recent_msgs[-2:], ensure_ascii=False)}")
+
+        last_case = mem.get("last_case") or {}
+        for key, label in [
+            ("brand", "品牌"), ("charger_model", "型号"), ("rated_power_kw", "额定功率"),
+            ("city", "城市"), ("fault_codes", "故障码"),
+        ]:
+            val = last_case.get(key)
+            if val is not None and val != "" and val != []:
+                lines.append(f"- 当前案例{label}：{json.dumps(val, ensure_ascii=False)}")
+
+        missing = mem.get("missing_info") or []
+        if missing:
+            lines.append(f"- 缺失信息：{json.dumps(missing, ensure_ascii=False)}")
+
+        safety = mem.get("recent_safety") or {}
+        risk = safety.get("risk_level", "")
+        if risk:
+            lines.append(f"- 安全风险等级：{risk}")
+
+        ticket = mem.get("recent_ticket") or {}
+        for key, label in [("ticket_id", "工单 ID"), ("priority", "工单优先级")]:
+            val = ticket.get(key, "")
+            if val:
+                lines.append(f"- {label}：{val}")
+
+        return "\n".join(lines) if lines else "（无当前会话上下文）"
 
     def _parse_memory_query(self, user_input: str, state: ChargerDiagnosisGraphState) -> MemoryQueryResult:
         """LLM 驱动的记忆查询解析（memory_answer v2）。
@@ -807,9 +935,10 @@ class ChargerDiagnosisWorkflow:
         query_scope、entities、answer_style。输出经过 clean_fields()、
         normalize_scope()、normalize_answer_style() 清洗。
 
-        重要：此方法只在 memory_answer 链路（即 _is_memory_recall_query 已判定为 True）
-        中被调用，因此 LLM 不可用 / 解析异常时返回 is_memory_query=True +
-        fallback_reason，而非 is_memory_query=False，以保持语义一致。
+        LLM 不可用 / 解析异常时返回 is_memory_query=True + fallback_reason，
+        而非 is_memory_query=False，以保持语义一致（resolver 回退到全字段扫描）。
+        调用方通过检查 is_memory_query=False 且 fallback_reason 为空来判断
+        LLM 主动判定非记忆查询，此时应回退主诊断链路。
         非法字段、非法 scope/style 会写入 state trace 的 warning 节点。
         """
         result = MemoryQueryResult(is_memory_query=True, fallback_reason="")
@@ -822,7 +951,11 @@ class ChargerDiagnosisWorkflow:
             return result
 
         try:
-            parsed = invoke_json(self.llm, MEMORY_QUERY_PARSE_PROMPT, {"user_input": user_input})
+            session_ctx = self._build_session_context_for_parse(state)
+            parsed = invoke_json(self.llm, MEMORY_QUERY_PARSE_PROMPT, {
+                "user_input": user_input,
+                "session_context": session_ctx,
+            })
             if not parsed:
                 result.fallback_reason = "empty_response"
                 self._add_trace(state, "memory_parse", "LLM 返回空", "warning",

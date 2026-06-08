@@ -15,10 +15,19 @@ MEMORY_QUERY_PARSE_PROMPT = ChatPromptTemplate.from_messages([
         """用户问题：
 {user_input}
 
+当前会话上下文（仅用于判断无"刚才/之前"显式标记的自然追问是否在询问会话已知信息；
+如果是新故障报告/新设备/通用咨询，仍应 is_memory_query=false）：
+{session_context}
+
 你需要判断用户是否在询问当前会话中已经记录过的历史信息（如型号、城市、风险等级、缺失信息等）。
 
 如果是在询问历史记忆信息，设置 is_memory_query 为 true，并选择对应的 target_fields。
 如果不是在询问历史记忆（如新的故障报告、新的保修咨询、新的使用问题等），设置 is_memory_query 为 false，target_fields 为空数组。
+
+重要判断规则：
+- 用户问题中的实体（型号/品牌/故障码/城市）出现在上述上下文中 → 很可能是记忆追问 → is_memory_query=true
+- 用户问题描述的是全新故障/新设备/新场景，且上下文中没有对应实体 → is_memory_query=false
+- "现在又跳闸了怎么办"/"漏保又跳了"/"怎么处理"等安全/诊断短句，即使上下文有相关信息也属于新的诊断请求 → is_memory_query=false
 
 target_fields 只能是以下字段（按类别分组）。LLM 不能发明此列表之外的字段：
 
@@ -73,6 +82,14 @@ entities：用户问题中提到的实体关键词，用于后续 FTS5 搜索。
 
 示例5：
 用户："你好"
+输出：{{"is_memory_query": false, "target_fields": [], "query_scope": "recent", "entities": [], "answer_style": "precise"}}
+
+示例6（上下文含型号 VG-11KW-Pro）：
+用户："VG-11KW-Pro 是多少功率？"
+输出：{{"is_memory_query": true, "target_fields": ["rated_power_kw", "charger_model"], "query_scope": "recent", "entities": ["VG-11KW-Pro"], "answer_style": "precise"}}
+
+示例7（上下文含型号 VG-11KW-Pro，但用户问的是新诊断）：
+用户："现在又跳闸了怎么办？"
 输出：{{"is_memory_query": false, "target_fields": [], "query_scope": "recent", "entities": [], "answer_style": "precise"}}
 
 输出 JSON：""",

@@ -81,26 +81,26 @@ class ApiContractTest(unittest.TestCase):
                     "tool_history": [],
                 }
 
-        client = TestClient(app)
-        session_id = client.post("/api/memory/sessions").json()["data"]["session_id"]
+        with TestClient(app) as client:
+            session_id = client.post("/api/memory/sessions").json()["data"]["session_id"]
 
-        with patch("api.workflow", FakeWorkflow()):
-            with patch("api.run_store", AsyncRunManager(timeout_seconds=5)):
-                start_response = client.post(
-                    "/api/charger-diagnosis/start",
-                    json={"user_input": "充电桩异常", "retrieval_options": {}, "session_id": session_id},
-                )
-                run_id = start_response.json()["data"]["run_id"]
-                for _ in range(20):
-                    status_response = client.get(f"/api/charger-diagnosis/runs/{run_id}?view=summary")
-                    payload = status_response.json()["data"]
-                    if payload["status"] == "completed":
-                        break
-                    time.sleep(0.05)
+            with patch("api.workflow", FakeWorkflow()):
+                with patch("api.run_store", AsyncRunManager(timeout_seconds=5)):
+                    start_response = client.post(
+                        "/api/charger-diagnosis/start",
+                        json={"user_input": "充电桩异常", "retrieval_options": {}, "session_id": session_id},
+                    )
+                    run_id = start_response.json()["data"]["run_id"]
+                    for _ in range(20):
+                        status_response = client.get(f"/api/charger-diagnosis/runs/{run_id}?view=summary")
+                        payload = status_response.json()["data"]
+                        if payload["status"] == "completed":
+                            break
+                        time.sleep(0.05)
 
-        self.assertEqual(payload["session_id"], session_id)
-        self.assertEqual(payload["status"], "completed")
-        self.assertIn(session_id, payload["customer_reply"])
+            self.assertEqual(payload["session_id"], session_id)
+            self.assertEqual(payload["status"], "completed")
+            self.assertIn(session_id, payload["customer_reply"])
 
     def test_health_endpoint_returns_ok(self) -> None:
         client = TestClient(app)

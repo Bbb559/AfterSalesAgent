@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Form, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.graph_workflow import ChargerDiagnosisWorkflow
@@ -297,6 +298,80 @@ def create_memory_session() -> ApiResponse:
             "current_session_id": get_memory_manager().current_session_id,
         },
     )
+
+
+@app.get("/api/memory/sessions/{session_id}")
+def get_memory_session(session_id: str):
+    """查询 SQLite 中长期记忆的 session 记录（只读调试接口）。"""
+    store = get_memory_manager().sqlite_store
+    if store is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": "SQLite 长期记忆双写未启用，请设置 MEMORY_SQLITE_DUAL_WRITE=true",
+            },
+        )
+    if not store.available:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": f"SQLite 长期记忆存储不可用：{store.error}",
+            },
+        )
+    session = store.get_session(session_id)
+    if session is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "success": False,
+                "error": f"会话不存在：{session_id}",
+            },
+        )
+    return {"success": True, "data": session}
+
+
+@app.get("/api/memory/sessions/{session_id}/messages")
+def get_memory_session_messages(session_id: str, limit: int = Query(200, ge=1, le=1000)):
+    """查询 SQLite 中长期记忆的 session 消息列表（只读调试接口）。"""
+    store = get_memory_manager().sqlite_store
+    if store is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": "SQLite 长期记忆双写未启用，请设置 MEMORY_SQLITE_DUAL_WRITE=true",
+            },
+        )
+    if not store.available:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": f"SQLite 长期记忆存储不可用：{store.error}",
+            },
+        )
+    # 先确认 session 存在
+    session = store.get_session(session_id)
+    if session is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "success": False,
+                "error": f"会话不存在：{session_id}",
+            },
+        )
+    messages = store.get_messages(session_id, limit=limit)
+    return {
+        "success": True,
+        "data": {
+            "session_id": session_id,
+            "message_count": len(messages),
+            "limit": limit,
+            "messages": messages,
+        },
+    }
 
 
 @app.get("/api/kb/list", response_model=ApiResponse)

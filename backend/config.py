@@ -141,3 +141,26 @@ class RetrievalConfig:
 # ---------------------------------------------------------------------------
 MEMORY_ANSWER_V2 = read_bool_env("MEMORY_ANSWER_V2", False)
 
+# ---------------------------------------------------------------------------
+# SQLite 长期记忆双写 feature flag
+# ---------------------------------------------------------------------------
+MEMORY_SQLITE_DUAL_WRITE = read_bool_env("MEMORY_SQLITE_DUAL_WRITE", True)
+
+# ---------------------------------------------------------------------------
+# SQLite 主读 feature flag（阶段 3 — 验证中，默认关闭）
+# ---------------------------------------------------------------------------
+# true  → recall_context() 优先从 SQLite 读取 session/case/ticket 维度，
+#         失败时回退 JSON。
+# false → 保持现有 JSON 路径不变。
+MEMORY_READ_FROM_SQLITE = read_bool_env("MEMORY_READ_FROM_SQLITE", False)
+
+# ---------------------------------------------------------------------------
+# Session TTL 配置（天数）
+# ---------------------------------------------------------------------------
+# active 且 updated_at < now - N days → expired
+MEMORY_SESSION_EXPIRE_AFTER_DAYS = int(os.getenv("MEMORY_SESSION_EXPIRE_AFTER_DAYS", "7"))
+# expired 且 updated_at < now - N days → archived（从初始过期时间起算）
+MEMORY_SESSION_ARCHIVE_AFTER_DAYS = int(os.getenv("MEMORY_SESSION_ARCHIVE_AFTER_DAYS", "30"))
+# archived 且 updated_at < now - N days 的清理窗口（本阶段不执行物理删除）
+MEMORY_SESSION_CLEANUP_AFTER_DAYS = int(os.getenv("MEMORY_SESSION_CLEANUP_AFTER_DAYS", "14"))
+

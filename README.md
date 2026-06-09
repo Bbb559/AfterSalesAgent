@@ -1471,3 +1471,70 @@ React 前端
 5. 工具层后续 MCP 化
 
 本项目适合作为大模型 Agent / Agentic RAG / 售后智能客服 / 安全诊断工作流方向的完整作品集项目。
+
+---
+
+## 13. 后续优化计划 / Roadmap
+
+以下为按主题分组的后续优化方向，优先级的最终排序以实际迭代为准。
+
+### 13.1 工程稳定性
+
+| 项目 | 说明 |
+|------|------|
+| Memory TTL 生命周期闭环 | 完善 `active → expired → archived` 三阶段流转。当前已通过环境变量配置天数，后续增加定时归档任务和一键查询过期会话的调试接口。**不实现物理删除。** |
+| 集成测试常态化 | 保留 `RUN_INTEGRATION_SMOKE=1` 门控。后续将集成测试纳入 CI 或 pre-commit hook，确保全链路冒烟在每次改动前可执行。 |
+| 知识库索引健康检查 | 增加启动时索引可用性诊断（检查 `data/indexes/` 是否存在、文件数是否匹配、FAISS index 是否可加载）。检索前如发现索引不可用，在 trace 和 governance 中明确告警，而非静默返回空结果。 |
+| Config 与文档一致性 | `MEMORY_SESSION_ARCHIVE_AFTER_DAYS` / `MEMORY_SESSION_CLEANUP_AFTER_DAYS` 等默认值需与 README 和 `.env.example` 保持三方一致。 |
+
+### 13.2 RAG 质量优化
+
+| 项目 | 说明 |
+|------|------|
+| 固定 eval 问题集 | 建立覆盖知识库内、知识库外、安全高风险、保修政策、多轮追问场景的评估集，每次 RAG 改动后跑 eval，防止检索质量退化。 |
+| 检索质量提升 | 优化 chunk 大小和重叠策略；优化 BM25 + FAISS 混合检索权重和 RRF 融合参数；引入 rerank 模型提升 TopK 精度；增强引用准确性（输出文件名、页码、chunk_id、文档类型、产品型号、版本号）。 |
+| 多格式 / 多模态解析 | 后续支持更多文档格式（Word、Markdown、HTML、扫描件 OCR）。同步评估新的向量数据库（如 Milvus、Qdrant）和图数据库（如 Neo4j）用于知识图谱增强检索。 |
+
+### 13.3 Agent / Prompt / Safety
+
+| 项目 | 说明 |
+|------|------|
+| 结构化 Prompt 持续增强 | 持续优化 intent / case_extract / diagnosis / action / audit 各 Agent 的 Prompt 和输出 Schema，减少 LLM 输出不稳定导致的后处理补丁。 |
+| 本地安全规则兜底 | 保持 `safety_rules.py` 的确定性安全信号匹配作为最后防线。LLM 可用时由 LLM 做语义安全判断，本地规则负责硬拦截（明火、触电等不可协商的安全信号）。 |
+| 安全语义边界测试 | 继续补充假设风险（"如果着火了怎么办"）、历史风险（"上次跳闸了"）、否定风险（"没有烧焦味"）的测试用例，防止安全带误判或漏判。 |
+| 防编造机制 | 未知知识库场景下，`evidence_status` 必须为 `insufficient`；禁止编造故障码含义、品牌特定原因或假装引用资料。后续增强 `_validate_answer_fields` 覆盖更多 LLM 编造措辞（如 "应该是" "可能是" "常见原因是"）。 |
+| Prompt 注入防御 | 当前检测到注入标记仅加 `governance.warnings` 不阻断。后续评估是否在 input_guard 阶段做 sanitize 或阻断，同时避免误杀正常用户输入。 |
+
+### 13.4 Memory Answer v2
+
+| 项目 | 说明 |
+|------|------|
+| 长句追问识别 | 当前二次 gate（`_maybe_contextual_memory_query`）要求输入 < 50 字符。后续优化对长句追问（如 "你刚才说的那个故障码对应的解决方案具体是什么"）的识别能力，避免双门漏判。 |
+| 字段召回可信度 | 增强 FTS5 fallback 的抽取精度；对 confidence=medium 的字段在回答中标注措辞（"根据历史消息推断"），防止用户将记忆召回误认为诊断结论。 |
+| 记忆 ≠ 诊断证据 | 保持当前约束：记忆只作为上下文和追问补全，诊断依据仅来自当前输入和 RAG 知识库。后续增加 audit 节点的记忆引用检查。 |
+| SQLite 主读路径完善 | 当前 `MEMORY_READ_FROM_SQLITE=true` 灰度验证中。后续需补齐 Customer / Charger / Site 维度在 SQLite 中的存储表，使 SQLite 路径可独立提供完整 `recall_context` 而不依赖 `case` 参数填充。 |
+
+### 13.5 Tools / MCP
+
+| 项目 | 说明 |
+|------|------|
+| 工具 MCP 化 | 后续将稳定的本地工具（warranty、memory_context_read、dispatch_draft 等）逐步暴露为 MCP tool，支持外部 Agent 或 IDE 插件调用。 |
+| 本地 Python fallback | MCP 服务不可用时自动回退本地 Python 调用，保证主链路不因 MCP 服务中断而崩溃。 |
+| 工具失败可见性 | 增强工具失败时的 trace 记录、`tool_history` 状态标记和 audit warning 汇总，避免工具静默失败导致派工草稿不完整或保修判断缺失。 |
+
+### 13.6 产品化
+
+| 项目 | 说明 |
+|------|------|
+| FastAPI SSE 流式接口 | 实现 `POST /api/charger-diagnosis/run/stream` SSE 端点，支持前端实时展示工作流节点进度。 |
+| Debug log 查询接口 | 增加 `GET /api/charger-diagnosis/runs/{run_id}/debug-log` 接口，方便调试时直接通过 API 拉取完整 trace 和 tool_history。 |
+| 前端 UI 优化 | 节点状态面板增强（input/output/duration/warning 弹窗）；RAG 证据来源展示（文件名、页码）；安全风险红黄绿标识；知识库构建进度条；系统状态轻量面板（API 在线状态、延迟、已加载知识库数、当前模型）。 |
+| 服务端数据库 | 后续视部署需求考虑从 SQLite + JSON 文件迁移到 MySQL / PostgreSQL 等服务端关系数据库，支持多实例部署和数据持久化。 |
+
+### 暂不做的方向
+
+- 不实现 SQLite / JSON 物理删除（TTL 只标记状态，数据完整保留）
+- 不新增跨 session 自动召回
+- 不做复杂客户画像或偏好建模
+- 不做记忆编辑后台
+- 不引入新的前端重型依赖

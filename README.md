@@ -421,7 +421,6 @@ retrievers.py
 splitters.py
 stores.py
 utils.py
-web_searcher.py
 ```
 
 RAG 流程：

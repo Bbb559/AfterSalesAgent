@@ -742,6 +742,9 @@ class MemoryManager:
 
         customer = self.customer_memory.get(customer_id) if customer_id else None
         charger = self.charger_memory.get(charger_id) if charger_id else None
+        # 保证 charger 始终包含 serial_number 字段，避免下游 KeyError
+        charger = dict(charger) if charger else {}
+        charger.setdefault("serial_number", "")
         site = self.site_memory.get(site_id) if site_id else None
         ticket = self.ticket_memory.get(last_ticket_id) if last_ticket_id else None
         session_summary = self._session_summary(session)
@@ -823,10 +826,26 @@ class MemoryManager:
         charger_id = self.charger_memory._build_key(case)
         site_id = self.site_memory._build_key(case)
 
-        # Customer / Charger / Site 数据 — SQLite 尚无对应表，返回 {}
-        customer: dict[str, Any] = {}
-        charger: dict[str, Any] = {}
-        site: dict[str, Any] = {}
+        # Customer / Charger / Site 数据 — SQLite 尚无对应表，从当前 case 提取稳定结构
+        customer: dict[str, Any] = {
+            "customer_id": customer_id,
+            "contact_name": case.get("contact_name", ""),
+            "contact_phone": case.get("contact_phone", ""),
+            "city": case.get("city", ""),
+            "contact_address": case.get("contact_address", ""),
+        }
+        charger: dict[str, Any] = {
+            "charger_id": charger_id,
+            "serial_number": case.get("serial_number", ""),
+            "brand": case.get("brand", ""),
+            "charger_model": case.get("charger_model", ""),
+        }
+        site: dict[str, Any] = {
+            "site_id": site_id,
+            "city": case.get("city", ""),
+            "contact_address": case.get("contact_address", ""),
+            "installation_type": case.get("installation_type", ""),
+        }
 
         # Session search：复用 sqlite_store 的 FTS5 搜索，适配返回格式
         search_query = self._memory_search_query(case)

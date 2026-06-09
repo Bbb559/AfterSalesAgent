@@ -565,8 +565,8 @@ MEMORY_READ_FROM_SQLITE=false  # 默认关闭，保持 JSON 主读
    - 当前阶段不执行任何物理删除操作。
 4. **TTL 三层配置化**：
    - `MEMORY_SESSION_EXPIRE_AFTER_DAYS`（默认 7 天）— 无活动 → expired
-   - `MEMORY_SESSION_ARCHIVE_AFTER_DAYS`（默认 30 天）— expired → archived
-   - `MEMORY_SESSION_CLEANUP_AFTER_DAYS`（默认 14 天）— 预留清理窗口配置，本阶段不执行物理删除
+   - `MEMORY_SESSION_ARCHIVE_AFTER_DAYS`（默认 14 天）— expired → archived
+   - `MEMORY_SESSION_CLEANUP_AFTER_DAYS`（默认 7 天）— 预留清理窗口配置，本阶段不执行物理删除
 5. **FTS5 当前 session 搜索**：当前 session 的 FTS5 搜索在 recall_context 中自动执行。跨 session 搜索必须显式触发，不允许自动污染当前诊断。
 6. **JSON 是 Source of Truth**：当前默认 JSON 仍是主读路径，SQLite 做双写和调试查询。阶段 3 通过 `MEMORY_READ_FROM_SQLITE=true` 可切换 SQLite 优先读取 session/case/ticket 维度（失败时回退 JSON），灰度验证中。
 7. **不做复杂客户画像**：长期记忆保持轻量化定位，不做自动跨 session 召回、客户画像、偏好建模等复杂功能。仅提供售后服务连续性所需的轻量上下文补充。
@@ -701,8 +701,8 @@ MEMORY_READ_FROM_SQLITE=false   # true → recall_context() 优先从 SQLite 读
 
 # Session TTL 配置（天数）
 MEMORY_SESSION_EXPIRE_AFTER_DAYS=7    # active → expired 天数
-MEMORY_SESSION_ARCHIVE_AFTER_DAYS=30  # expired → archived 天数
-MEMORY_SESSION_CLEANUP_AFTER_DAYS=14  # archived 后清理窗口（本阶段不执行删除）
+MEMORY_SESSION_ARCHIVE_AFTER_DAYS=14  # expired → archived 天数
+MEMORY_SESSION_CLEANUP_AFTER_DAYS=7  # archived 后清理窗口（本阶段不执行删除）
 ```
 
 如果没有配置 LLM key，流程不会直接崩溃，会退回到本地 rules、tools 和 RAG 的兜底逻辑。

@@ -59,9 +59,12 @@ class SafetyResult:
     need_onsite: bool = False # 是否需要现场服务
     need_electrician: bool = False # 是否需要电工
     reason: str = "" # 评估理由
-    matched_safety_signals: list[str] = field(default_factory=list) # 匹配安全信号
+    matched_safety_signals: list[str] = field(default_factory=list) # 匹配的已确认安全信号
     forbidden_actions: list[str] = field(default_factory=list) # 禁止行动
     required_customer_actions: list[str] = field(default_factory=list) # 要求客户采取的行动
+    # v2 debug 字段 — 仅用于调试/提示，不参与 risk_level 判定
+    negated_safety_signals: list[str] = field(default_factory=list) # 被否定词覆盖的安全信号
+    uncertain_safety_mentions: list[str] = field(default_factory=list) # 假设/询问/不确定语义中的安全词
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

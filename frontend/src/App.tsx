@@ -151,6 +151,7 @@ function AgentPanel({
     try {
       const session = await createSession();
       setSessionId(session.session_id);
+      sessionRef.current = session.session_id;  // 立即同步 ref，避免异步竞态
       setReply("");
       setSummary(null);
       setSessionNotice(successMessage);
@@ -175,6 +176,7 @@ function AgentPanel({
       try {
         const session = await createSession();
         setSessionId(session.session_id);
+        sessionRef.current = session.session_id;  // 立即同步 ref，避免异步竞态
       } catch (err) {
         setCreatingSession(false);
         setError(`创建会话失败：${readableError(err)}`);

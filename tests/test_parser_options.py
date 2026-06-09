@@ -2,7 +2,6 @@
 
 import unittest
 from io import BytesIO
-from pathlib import Path
 from unittest.mock import patch
 
 
@@ -17,13 +16,10 @@ class FakeUpload(BytesIO):
 
 
 class ParserOptionsTest(unittest.TestCase):
-    def test_config_and_frontend_only_show_pypdf_and_mineru(self) -> None:
+    def test_config_only_show_pypdf_and_mineru(self) -> None:
         from backend.config import PARSER_OPTIONS
 
-        gradio_source = Path("gradio_app.py").read_text(encoding="utf-8")
         self.assertEqual(PARSER_OPTIONS, ["pypdf", "mineru"])
-        self.assertNotIn("mineru" + "-custom", gradio_source)
-        self.assertNotIn("langchain" + "-mineru", gradio_source)
 
     def test_parse_pdfs_routes_to_pypdf(self) -> None:
         import backend.rag.parsers as parsers

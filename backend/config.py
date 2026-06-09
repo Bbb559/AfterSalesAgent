@@ -39,10 +39,6 @@ FASTAPI_PORT = int(os.getenv("FASTAPI_PORT", "8800"))
 FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", f"http://{FASTAPI_HOST}:{FASTAPI_PORT}")
 
 
-# Gradio 前端配置
-GRADIO_HOST = os.getenv("GRADIO_HOST", "127.0.0.1")
-GRADIO_PORT = int(os.getenv("GRADIO_PORT", "7860"))
-
 
 # 大模型与向量模型配置
 API_KEY = os.getenv("API_KEY", "")
@@ -135,11 +131,6 @@ class RetrievalConfig:
     query_rewrite_max_length: int = DEFAULT_QUERY_REWRITE_MAX_LENGTH
     use_rerank: bool = False
 
-
-# ---------------------------------------------------------------------------
-# memory_answer v2 feature flag
-# ---------------------------------------------------------------------------
-MEMORY_ANSWER_V2 = read_bool_env("MEMORY_ANSWER_V2", False)
 
 # ---------------------------------------------------------------------------
 # SQLite 长期记忆双写 feature flag

@@ -40,7 +40,7 @@ class KnowledgeBasePaths:
 
 
 class UploadedFileAdapter(BytesIO):
-    """把 FastAPI、Gradio 或路径文件统一成 pypdf/MinerU 可读取的文件对象。"""
+    """把 FastAPI 或路径文件统一成 pypdf/MinerU 可读取的文件对象。"""
 
     def __init__(self, name: str, content: bytes) -> None:
         super().__init__(content)

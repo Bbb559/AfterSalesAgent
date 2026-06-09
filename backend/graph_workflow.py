@@ -4,7 +4,6 @@ import json
 import time
 from typing import Any, Callable, TypedDict
 
-from backend import config
 from backend.agents.action_agent import ChargerActionAgent
 from backend.agents.audit_agent import ChargerAuditAgent
 from backend.agents.case_extract_agent import ChargerCaseExtractAgent
@@ -207,135 +206,47 @@ class ChargerDiagnosisWorkflow:
         user_input = state.get("user_input", "")
         memory_context = state.get("memory_context", {})
 
-        # -----------------------------------------------------------------
         # memory_answer v2：parse → resolve → reply 三阶段
-        # -----------------------------------------------------------------
-        if config.MEMORY_ANSWER_V2:
-            # 阶段 1: LLM 解析查询意图
-            parsed = self._parse_memory_query(user_input, state)
+        # 阶段 1: LLM 解析查询意图
+        parsed = self._parse_memory_query(user_input, state)
 
-            # LLM 明确判断非记忆查询 → 标记 rejected 回退主诊断链路
-            if not parsed.is_memory_query and not parsed.fallback_reason:
-                self._add_trace(
-                    state, "memory_answer", "非记忆查询",
-                    "warning",
-                    {"user_input": user_input},
-                    {"note": "LLM 判断 is_memory_query=false，回退到主诊断链路。",
-                     "parse_result": parsed.to_dict()},
-                )
-                state["memory_answer_rejected"] = True
-                return state
-
-            # 阶段 2: field resolver v1 从结构化来源取值
-            resolution = self._resolve_memory_fields(parsed, memory_context, user_input, state)
-
-            self._emit_progress(
-                state,
-                "memory_answer",
-                "会话记忆回答",
-                "running",
-                {"session_id": state.get("session_id", ""), "version": "v2",
-                 "is_memory_query": parsed.is_memory_query,
-                 "target_fields": parsed.target_fields,
-                 "fallback_reason": parsed.fallback_reason,
-                 "resolved_count": len(resolution.resolved_values),
-                 "missing_count": len(resolution.missing_fields),
-                 "confidence": resolution.confidence},
-                {},
-            )
-
-            # 阶段 3: 回复生成（Answer LLM，不可用时回退 _build_memory_reply_v2）
-            reply = self._build_memory_answer_llm(parsed, resolution, user_input, state)
-
-            state["triage"] = TriageResult(
-                intent="memory_answer",
-                confidence="high",
-                reason="命中会话记忆查询请求（memory_answer v2），直接读取当前 SessionMemory，不进入 RAG 诊断链路。",
-            ).to_dict()
-            state["case"] = ChargerCase(
-                issue_type="memory_answer",
-                issue_description=user_input,
-                customer_requests=["会话记忆查询"],
-                missing_info=[],
-                raw_text=user_input,
-            ).to_dict()
-            state["retrieval"] = {
-                "query": user_input,
-                "results": [],
-                "sources": [],
-                "trace": {
-                    "mode": "memory_answer",
-                    "version": "v2",
-                    "session_id": state.get("session_id", ""),
-                    "parse_result": parsed.to_dict(),
-                    "resolution": resolution.to_dict(),
-                },
-            }
-            state["safety"] = SafetyResult(
-                risk_level="p3_low",
-                reason="会话记忆查询请求，不作为充电桩安全诊断。",
-            ).to_dict()
-            state["diagnosis"] = ChargerDiagnosisResult(
-                summary="会话记忆查询请求，不做售后诊断。",
-                evidence_status="insufficient",
-                priority="p3_low",
-                suggested_next_step="如需继续处理充电桩问题，请补充当前故障现象或故障码。",
-            ).to_dict()
-            state["warranty"] = WarrantyResult().to_dict()
-            state["dispatch"] = DispatchDraft(
-                customer_problem=user_input,
-                suggested_dispatch="会话记忆查询请求，不创建派工。",
-                priority="p3_low",
-            ).to_dict()
-            state["action"] = ChargerActionResult(
-                customer_reply=reply,
-                internal_advice="会话记忆查询请求（memory_answer v2）。",
-            ).to_dict()
-            state["audit"] = ChargerAuditResult(
-                passed=True,
-                final_note="会话记忆查询请求，无需售后诊断审核。",
-                risk_level="p3_low",
-            ).to_dict()
-            state["governance"] = input_rules.build_governance_summary(
-                input_safety=state.get("input_safety", {}),
-                memory_context=memory_context,
-                audit=state.get("audit", {}),
-            )
+        # LLM 明确判断非记忆查询 → 标记 rejected 回退主诊断链路
+        if not parsed.is_memory_query and not parsed.fallback_reason:
             self._add_trace(
-                state,
-                "memory_answer",
-                "会话记忆回答（v2）",
-                "completed",
-                {"session_id": state.get("session_id", ""), "version": "v2",
-                 "target_fields": parsed.target_fields,
-                 "resolved_count": len(resolution.resolved_values),
-                 "missing_count": len(resolution.missing_fields),
-                 "confidence": resolution.confidence,
-                 "fallback_reason": parsed.fallback_reason},
-                {"message": reply,
-                 "parse_result": parsed.to_dict(),
-                 "resolution": resolution.to_dict()},
-                start,
+                state, "memory_answer", "非记忆查询",
+                "warning",
+                {"user_input": user_input},
+                {"note": "LLM 判断 is_memory_query=false，回退到主诊断链路。",
+                 "parse_result": parsed.to_dict()},
             )
+            state["memory_answer_rejected"] = True
             return state
 
-        # -----------------------------------------------------------------
-        # 旧链路（MEMORY_ANSWER_V2=False 时保留）
-        # -----------------------------------------------------------------
-        answer_type = self._memory_query_type(user_input)  # deprecated
+        # 阶段 2: field resolver v1 从结构化来源取值
+        resolution = self._resolve_memory_fields(parsed, memory_context, user_input, state)
+
         self._emit_progress(
             state,
             "memory_answer",
             "会话记忆回答",
             "running",
-            {"session_id": state.get("session_id", ""), "answer_type": answer_type},
+            {"session_id": state.get("session_id", ""), "version": "v2",
+             "is_memory_query": parsed.is_memory_query,
+             "target_fields": parsed.target_fields,
+             "fallback_reason": parsed.fallback_reason,
+             "resolved_count": len(resolution.resolved_values),
+             "missing_count": len(resolution.missing_fields),
+             "confidence": resolution.confidence},
             {},
         )
-        reply = self._build_memory_reply(answer_type, user_input, memory_context)  # deprecated
+
+        # 阶段 3: 回复生成（Answer LLM，不可用时回退 _build_memory_reply_v2）
+        reply = self._build_memory_answer_llm(parsed, resolution, user_input, state)
+
         state["triage"] = TriageResult(
             intent="memory_answer",
             confidence="high",
-            reason="命中会话记忆查询请求，直接读取当前 SessionMemory，不进入 RAG 诊断链路。",
+            reason="命中会话记忆查询请求（memory_answer v2），直接读取当前 SessionMemory，不进入 RAG 诊断链路。",
         ).to_dict()
         state["case"] = ChargerCase(
             issue_type="memory_answer",
@@ -348,7 +259,13 @@ class ChargerDiagnosisWorkflow:
             "query": user_input,
             "results": [],
             "sources": [],
-            "trace": {"mode": "memory_answer", "session_id": state.get("session_id", ""), "answer_type": answer_type},
+            "trace": {
+                "mode": "memory_answer",
+                "version": "v2",
+                "session_id": state.get("session_id", ""),
+                "parse_result": parsed.to_dict(),
+                "resolution": resolution.to_dict(),
+            },
         }
         state["safety"] = SafetyResult(
             risk_level="p3_low",
@@ -366,7 +283,10 @@ class ChargerDiagnosisWorkflow:
             suggested_dispatch="会话记忆查询请求，不创建派工。",
             priority="p3_low",
         ).to_dict()
-        state["action"] = ChargerActionResult(customer_reply=reply, internal_advice="会话记忆查询请求。").to_dict()
+        state["action"] = ChargerActionResult(
+            customer_reply=reply,
+            internal_advice="会话记忆查询请求（memory_answer v2）。",
+        ).to_dict()
         state["audit"] = ChargerAuditResult(
             passed=True,
             final_note="会话记忆查询请求，无需售后诊断审核。",
@@ -380,10 +300,17 @@ class ChargerDiagnosisWorkflow:
         self._add_trace(
             state,
             "memory_answer",
-            "会话记忆回答",
+            "会话记忆回答（v2）",
             "completed",
-            {"session_id": state.get("session_id", ""), "answer_type": answer_type},
-            {"answer_type": answer_type, "message": reply},
+            {"session_id": state.get("session_id", ""), "version": "v2",
+             "target_fields": parsed.target_fields,
+             "resolved_count": len(resolution.resolved_values),
+             "missing_count": len(resolution.missing_fields),
+             "confidence": resolution.confidence,
+             "fallback_reason": parsed.fallback_reason},
+            {"message": reply,
+             "parse_result": parsed.to_dict(),
+             "resolution": resolution.to_dict()},
             start,
         )
         return state
@@ -761,17 +688,35 @@ class ChargerDiagnosisWorkflow:
         })
 
     def _is_memory_recall_query(self, text: str) -> bool:
-        """[deprecated] 硬编码关键词粗筛（含 _memory_query_type 调用），仅用于 MEMORY_ANSWER_V2=False 的旧链路。
+        """轻量关键词粗筛，作为 _parse_memory_query() 之前的本地 gate。
 
-        memory_answer v2 上线后此函数保持不变，作为 _parse_memory_query() 之前的
-        轻量本地粗判断——避免普通诊断请求每轮都调用 LLM。
+        避免普通诊断请求每轮都调用 LLM。关键词列表为确定性规则。
         """
-        # deterministic: 本地轻量粗筛，不依赖 LLM，关键词列表为确定性规则
         compact = str(text or "").strip()
         if not compact:
             return False
-        if self._memory_query_type(compact) != "unknown":
+
+        # 内联原 _memory_query_type 的字段级关键词快速匹配（旧链路已删除）
+        memory_markers = ["刚才", "刚刚", "前面", "之前", "上次", "那个", "还记得", "记得", "你记住", "当前记住"]
+        has_mm = any(marker in compact for marker in memory_markers)
+
+        if has_mm:
+            if any(token in compact for token in ["型号", "款型", "哪一款", "哪个型号"]):
+                return True
+            if any(token in compact for token in ["城市", "哪里", "哪儿", "在哪", "哪个地方", "什么地方"]):
+                return True
+            if any(token in compact for token in ["风险等级", "风险级别", "刚才风险", "安全等级"]):
+                return True
+            if "工单" in compact and any(token in compact for token in ["优先级", "等级", "priority"]):
+                return True
+
+        if any(token in compact for token in ["缺哪些", "缺少哪些", "还缺", "缺什么", "补充哪些", "缺失信息"]):
             return True
+        if any(token in compact for token in ["记住了哪些信息", "记了哪些信息", "记住哪些", "你记住了什么", "当前记住"]):
+            return True
+        if any(token in compact for token in ["我刚才说了什么", "刚才说了什么", "刚刚说了什么", "上一条问", "上一个问题", "我问的什么"]):
+            return True
+
         recent_markers = ["刚才", "刚刚", "前面", "之前", "前一个", "刚说", "刚提"]
         recall_markers = ["还记得", "记得", "复述", "说的是", "提到的是", "问的是", "我说的"]
         if any(marker in compact for marker in recent_markers) and any(marker in compact for marker in recall_markers):
@@ -791,38 +736,6 @@ class ChargerDiagnosisWorkflow:
             "上次问",
             "我问的什么",
         ])
-
-    def _memory_query_type(self, text: str) -> str:
-        """[deprecated] 硬编码字段级 if/else 匹配，仅用于 MEMORY_ANSWER_V2=False 的旧链路。
-
-        memory_answer v2 中已替换为 _parse_memory_query() + MemoryQueryResult。
-        旧链路移除时本函数应一并删除。
-        """
-        # deterministic: 字段级关键词匹配为确定性规则，不走 LLM
-        compact = str(text or "").strip()
-        if not compact:
-            return "unknown"
-        memory_markers = ["刚才", "刚刚", "前面", "之前", "上次", "那个", "还记得", "记得", "你记住", "当前记住"]
-        has_memory_marker = any(marker in compact for marker in memory_markers)
-        if has_memory_marker and any(token in compact for token in ["型号", "款型", "哪一款", "哪个型号"]):
-            return "model"
-        if has_memory_marker and any(token in compact for token in ["城市", "哪里", "哪儿", "在哪", "哪个地方", "什么地方"]):
-            return "city"
-        if any(token in compact for token in ["缺哪些", "缺少哪些", "还缺", "缺什么", "补充哪些", "缺失信息"]):
-            return "missing_info"
-        if has_memory_marker and any(token in compact for token in ["风险等级", "风险级别", "刚才风险", "安全等级"]):
-            return "risk_level"
-        if has_memory_marker and "工单" in compact and any(token in compact for token in ["优先级", "等级", "priority"]):
-            return "ticket_priority"
-        if any(token in compact for token in ["记住了哪些信息", "记了哪些信息", "记住哪些", "你记住了什么", "当前记住"]):
-            return "remembered_summary"
-        if any(token in compact for token in ["我刚才说了什么", "刚才说了什么", "刚刚说了什么", "上一条问", "上一个问题", "我问的什么"]):
-            return "last_user_message"
-        recent_markers = ["刚才", "刚刚", "前面", "之前", "上次"]
-        recall_markers = ["还记得", "记得", "复述", "说的是", "问的是", "提到"]
-        if any(marker in compact for marker in recent_markers) and any(marker in compact for marker in recall_markers):
-            return "last_user_message"
-        return "unknown"
 
     @staticmethod
     def _extract_recent_entities(session: Any) -> list[str]:
@@ -867,20 +780,32 @@ class ChargerDiagnosisWorkflow:
         if len(compact) >= 50:
             return False
 
-        # 条件 3：包含上一轮实体 或 上下文追问标记
+        # 条件 3：排除派工/上门/复现故障等主诊断意图
+        # 这类输入即使命中实体或上下文标记，也应走主诊断链路而非 memory_answer
+        _dispatch_action_markers = ["开工单", "派工", "安排师傅", "上门"]
+        if any(m in compact for m in _dispatch_action_markers):
+            return False
+        _fault_recurrence_markers = [
+            "又显示", "又报", "又跳闸", "又出现", "又发生",
+            "不能充电", "无法充电", "故障码", "漏保",
+        ]
+        if any(m in compact for m in _fault_recurrence_markers):
+            return False
+
+        # 条件 4：包含上一轮实体 或 上下文追问标记
         entities = self._extract_recent_entities(session)
         lower_input = compact.lower()
         for entity in entities:
             if entity.lower() in lower_input:
                 return True
 
-        # 上下文追问标记（不含"漏保/跳闸/故障码"，它们需要实体命中才能进入）
+        # 上下文追问标记（仅保留自然追问，派工/故障类已在条件 3 排除）
         context_markers = [
             "这个", "那个", "它", "该",
             "多少功率", "功率是多少",
             "什么型号", "哪个型号",
             "还缺", "缺什么",
-            "优先级", "风险等级", "工单",
+            "优先级", "风险等级",
         ]
         if any(marker in compact for marker in context_markers):
             return True
@@ -1648,108 +1573,6 @@ class ChargerDiagnosisWorkflow:
             if re.search(rf"{re.escape(label)}[是为：:]\s*\S", answer):
                 warnings.append(f"回答可能对缺失字段 '{label}' 做了肯定陈述（疑似编造）")
         return warnings
-
-    # ------------------------------------------------------------------
-    # [deprecated] 旧链路回复函数
-    # ------------------------------------------------------------------
-
-    def _build_memory_reply(self, answer_type: str, user_input: str, memory_context: dict[str, Any]) -> str:
-        """[deprecated] 硬编码 answer_type → 回复映射，仅用于 MEMORY_ANSWER_V2=False 的旧链路。
-
-        memory_answer v2 中已替换为 _build_memory_reply_v2() + MemoryQueryResult.target_fields 路由。
-        旧链路移除时本函数应一并删除。
-        """
-        session = memory_context.get("session", {}) if isinstance(memory_context, dict) else {}
-        last_case = memory_context.get("last_case", {}) if isinstance(memory_context, dict) else {}
-        if not last_case and isinstance(session, dict):
-            last_case = session.get("last_case") or session.get("recent_case") or {}
-        recent_safety = memory_context.get("recent_safety", {}) if isinstance(memory_context, dict) else {}
-        if not recent_safety and isinstance(session, dict):
-            recent_safety = session.get("last_safety") or {}
-        recent_ticket = memory_context.get("recent_ticket", {}) if isinstance(memory_context, dict) else {}
-        missing_info = memory_context.get("missing_info", []) if isinstance(memory_context, dict) else []
-        if not missing_info and isinstance(last_case, dict):
-            missing_info = last_case.get("missing_info", [])
-        last_dispatch = session.get("last_dispatch", {}) if isinstance(session, dict) else {}
-
-        if answer_type == "model":
-            model = str(last_case.get("charger_model", "") or "").strip()
-            return f"记得，刚才记录的充电桩型号是：{model}。" if model else self._missing_memory_reply("型号")
-
-        if answer_type == "city":
-            city = str(last_case.get("city", "") or "").strip()
-            return f"刚才记录的城市是：{city}。" if city else "当前会话没有记录该信息：城市。"
-
-        if answer_type == "missing_info":
-            items = self._string_list(missing_info)
-            if not items:
-                return "当前会话里暂未记录仍需补充的信息。"
-            return "当前还缺少这些信息：" + "、".join(items) + "。"
-
-        if answer_type == "risk_level":
-            risk_level = str(recent_safety.get("risk_level", "") or "").strip()
-            return f"刚才记录的风险等级是：{risk_level}。" if risk_level else self._missing_memory_reply("风险等级")
-
-        if answer_type == "ticket_priority":
-            priority = str(recent_ticket.get("priority") or last_dispatch.get("priority") or "").strip()
-            return f"刚才工单草稿的优先级是：{priority}。" if priority else self._missing_memory_reply("工单优先级")
-
-        if answer_type == "remembered_summary":
-            summary = self._remembered_summary(last_case, recent_safety, missing_info)
-            return summary if summary else "当前会话未记录该信息。"
-
-        previous_question = self._latest_non_memory_user_message(session.get("recent_user_messages", []), user_input)
-        if previous_question:
-            return f"你刚才说的是：{previous_question}"
-        return self._missing_memory_reply("上一条用户问题")
-
-    def _remembered_summary(self, last_case: dict[str, Any], recent_safety: dict[str, Any], missing_info: Any) -> str:
-        """[deprecated] _build_memory_reply() 的辅助函数，旧链路移除时本函数一并删除。"""
-        parts = []
-        field_labels = [
-            ("charger_model", "型号"),
-            ("city", "城市"),
-            ("issue_description", "问题描述"),
-            ("fault_codes", "故障码"),
-            ("observed_symptoms", "观察现象"),
-            ("safety_signals", "安全信号"),
-        ]
-        for key, label in field_labels:
-            value = last_case.get(key)
-            if isinstance(value, list):
-                value = "、".join(self._string_list(value))
-            if value:
-                parts.append(f"{label}：{value}")
-        risk_level = recent_safety.get("risk_level")
-        if risk_level:
-            parts.append(f"风险等级：{risk_level}")
-        missing = self._string_list(missing_info)
-        if missing:
-            parts.append(f"缺失信息：{'、'.join(missing)}")
-        return "当前会话已记录：" + "；".join(parts) + "。" if parts else ""
-
-    def _latest_non_memory_user_message(self, messages: Any, current_input: str) -> str:
-        """[deprecated] _build_memory_reply() 的辅助函数，旧链路移除时本函数一并删除。"""
-        if not isinstance(messages, list):
-            return ""
-        current = str(current_input or "").strip()
-        for item in reversed(messages):
-            content = str(item or "").strip()
-            if content and content != current and self._memory_query_type(content) == "unknown":
-                return content
-        return ""
-
-    def _missing_memory_reply(self, field_name: str) -> str:
-        return f"当前会话未记录该信息：{field_name}。"
-
-    def _string_list(self, value: Any) -> list[str]:
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, tuple):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if value:
-            return [str(value).strip()]
-        return []
 
     def _build_retrieval_query(self, user_input: str, case: dict[str, Any], triage: dict[str, Any]) -> str:
         parts = [user_input, triage.get("intent", "")]

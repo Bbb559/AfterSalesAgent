@@ -2,10 +2,54 @@ from __future__ import annotations
 
 """充电桩案例字段规整、结构化兜底和缺失信息计算。"""
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 from backend.schemas import ChargerCase
+
+
+# ---------------------------------------------------------------------------
+# 品牌/型号识别配置加载
+# ---------------------------------------------------------------------------
+
+_BRAND_PATTERNS_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "rules" / "brand_patterns.json"
+
+def _load_brand_patterns() -> dict[str, Any]:
+    """从 data/rules/brand_patterns.json 加载品牌识别配置，JSON 缺失时返回空字典。"""
+    try:
+        if _BRAND_PATTERNS_PATH.is_file():
+            return json.loads(_BRAND_PATTERNS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+# 模块加载时缓存，避免每次调用时重复读磁盘
+_BRAND_PATTERNS_CACHE: dict[str, Any] | None = None
+
+def _get_brand_patterns() -> dict[str, Any]:
+    global _BRAND_PATTERNS_CACHE
+    if _BRAND_PATTERNS_CACHE is None:
+        _BRAND_PATTERNS_CACHE = _load_brand_patterns()
+    return _BRAND_PATTERNS_CACHE
+
+def _build_model_regexes_from_config(config: dict[str, Any]) -> list[str]:
+    """从配置中提取所有品牌的型号正则模式，失败时返回空列表。"""
+    patterns: list[str] = []
+    for brand_entry in config.get("brands", []):
+        patterns.extend(brand_entry.get("model_patterns", []))
+    return patterns
+
+def _build_brand_names_from_config(config: dict[str, Any]) -> list[str]:
+    """从配置中提取所有品牌的名称和别名，用于品牌文本检测。"""
+    names: list[str] = []
+    for brand_entry in config.get("brands", []):
+        name = brand_entry.get("name", "")
+        if name:
+            names.append(name)
+        names.extend(brand_entry.get("aliases", []))
+    return names
 
 
 TEXT_FIELDS = [
@@ -199,8 +243,22 @@ def _is_empty_case_value(value: Any) -> bool:
 
 def _structured_fallback(text: str) -> dict[str, Any]:
     fault_codes = _extract_fault_codes(text)
+
+    # 品牌识别：优先从 data/rules/brand_patterns.json 加载，缺失时使用 VoltGate 硬编码兜底
+    brand = ""
+    cfg = _get_brand_patterns()
+    brand_names = _build_brand_names_from_config(cfg) if cfg else []
+    if not brand_names:
+        # JSON 缺失或为空时的硬编码 fallback
+        brand = "VoltGate" if "VoltGate" in text else ""
+    else:
+        for name in brand_names:
+            if name in text:
+                brand = name
+                break
+
     return ChargerCase(
-        brand="VoltGate" if "VoltGate" in text else "",
+        brand=brand,
         charger_model=_extract_charger_model(text, fault_codes),
         serial_number=_first_match(text, r"(?:SN|S/N|序列号|桩号|设备编号)[:：\s]*([A-Za-z0-9-]{6,})"),
         fault_codes=fault_codes,
@@ -213,8 +271,21 @@ def _structured_fallback(text: str) -> dict[str, Any]:
 
 def _extract_charger_model(text: str, fault_codes: list[str]) -> str:
     fault_set = {code.upper() for code in fault_codes}
-    candidates = re.findall(r"\b(VG-[A-Z0-9]+(?:-[A-Z0-9]+)*)\b", text, re.I)
-    candidates.extend(re.findall(r"\b(VG-[A-Za-z]+[A-Za-z0-9]*)\b", text, re.I))
+
+    # 型号正则：优先从 brand_patterns.json 加载，缺失时使用 VG-* 硬编码兜底
+    cfg = _get_brand_patterns()
+    model_patterns = _build_model_regexes_from_config(cfg) if cfg else []
+    if not model_patterns:
+        # JSON 缺失或为空时的硬编码 fallback
+        model_patterns = [
+            r"\b(VG-[A-Z0-9]+(?:-[A-Z0-9]+)*)\b",
+            r"\b(VG-[A-Za-z]+[A-Za-z0-9]*)\b",
+        ]
+
+    candidates: list[str] = []
+    for pattern in model_patterns:
+        candidates.extend(re.findall(pattern, text, re.I))
+
     seen = set()
     for candidate in candidates:
         key = candidate.upper()
@@ -235,7 +306,13 @@ def _extract_explicit_model(text: str) -> str:
         return ""
     value = match.group(1).strip()
     value = re.sub(r"\s+", " ", value)
-    if not re.search(r"\d|kw|kW|KW|华为|VoltGate|VG-", value):
+    # 品牌名来自 JSON 配置或硬编码兜底
+    cfg = _get_brand_patterns()
+    brand_names = _build_brand_names_from_config(cfg) if cfg else []
+    if not brand_names:
+        brand_names = ["VoltGate"]
+    brand_joined = "|".join(re.escape(n) for n in brand_names)
+    if not re.search(rf"\d|kw|kW|KW|{brand_joined}|VG-", value):
         return ""
     return value[:48].strip()
 

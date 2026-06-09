@@ -652,6 +652,15 @@ class SQLiteLongTermMemoryStore:
 
                 last_intent = str(triage_summary.get("intent", "") or "")
 
+                # 4b. 最近一条 assistant 回复作为 last_customer_reply
+                assistant_row = conn.execute(
+                    "SELECT content FROM messages "
+                    "WHERE session_id = ? AND role = 'assistant' "
+                    "ORDER BY turn_index DESC LIMIT 1",
+                    (session_id,),
+                ).fetchone()
+                last_customer_reply = str(assistant_row[0] or "") if assistant_row else ""
+
                 # 5. ticket（最近一条）
                 ticket_row = conn.execute(
                     "SELECT ticket_id, title, priority, status, raw_ticket_json, created_at "
@@ -701,7 +710,7 @@ class SQLiteLongTermMemoryStore:
                 "last_diagnosis": diagnosis_summary,
                 "last_dispatch": last_dispatch,
                 "recent_dispatch": last_dispatch,
-                "last_customer_reply": "",
+                "last_customer_reply": last_customer_reply,
                 "last_ticket_id": last_ticket_id,
                 "updated_at": updated_at,
             }
@@ -712,7 +721,7 @@ class SQLiteLongTermMemoryStore:
                 "missing_info": missing_info,
                 "recent_safety": safety_summary,
                 "recent_ticket": recent_ticket,
-                "last_customer_reply": "",
+                "last_customer_reply": last_customer_reply,
                 "last_ticket_id": last_ticket_id,
                 "session_summary": {
                     "session_id": session_id,

@@ -1,0 +1,14 @@
+{
+  "_note": "品牌/型号识别配置文件。当前为 Demo 阶段，仅适配 VoltGate / VG-* 型号模式。接入新品牌时向 brands 列表追加条目即可。",
+  "brands": [
+    {
+      "name": "VoltGate",
+      "aliases": ["VoltGate", "VG", "voltgate", "vg"],
+      "model_patterns": [
+        "\\b(VG-[A-Z0-9]+(?:-[A-Z0-9]+)*)\\b",
+        "\\b(VG-[A-Za-z]+[A-Za-z0-9]*)\\b"
+      ],
+      "default": true
+    }
+  ]
+}

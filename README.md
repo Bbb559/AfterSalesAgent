@@ -21,8 +21,6 @@
 * **SQLite FTS5 + JSON Memory**：会话记忆与长期摘要
 * **本地 Rules + Tools**：安全规则、保修工具、派工草稿、输出审核
 
-> 说明：`gradio_app.py` 目前仅作为旧版研发备用入口。主前端已经切换为 React，后续以 React + FastAPI 为主。
-
 ---
 
 ## 1. 项目定位
@@ -561,13 +559,17 @@ MEMORY_READ_FROM_SQLITE=false  # 默认关闭，保持 JSON 主读
 
 1. **诊断层隔离**：诊断层不把长期记忆作为故障判断证据。真正的诊断依据来自当前输入和 RAG 知识库。
 2. **action / ticket / customer_reply 层可用**：生成客户回复、工单和回复草稿时，可以读取历史派工状态、上次缺失信息、上次回复，用于服务连续性。
-3. **session 过期只标记不删除**：过期 session 只标记 `expired`，再标记 `archived`，不直接物理删除。
+3. **session 过期只标记不删除**：过期 session 只标记 `expired`，再标记 `archived`。
+   - `expired` 不是删除 — 只是标记会话已过期，数据完整保留。
+   - `archived` 也不是删除 — 只是标记可归档，数据仍可查询。
+   - 当前阶段不执行任何物理删除操作。
 4. **TTL 三层配置化**：
    - `MEMORY_SESSION_EXPIRE_AFTER_DAYS`（默认 7 天）— 无活动 → expired
    - `MEMORY_SESSION_ARCHIVE_AFTER_DAYS`（默认 30 天）— expired → archived
-   - `MEMORY_SESSION_CLEANUP_AFTER_DAYS`（默认 14 天）— 清理窗口配置，本阶段不执行删除
+   - `MEMORY_SESSION_CLEANUP_AFTER_DAYS`（默认 14 天）— 预留清理窗口配置，本阶段不执行物理删除
 5. **FTS5 当前 session 搜索**：当前 session 的 FTS5 搜索在 recall_context 中自动执行。跨 session 搜索必须显式触发，不允许自动污染当前诊断。
 6. **JSON 是 Source of Truth**：当前默认 JSON 仍是主读路径，SQLite 做双写和调试查询。阶段 3 通过 `MEMORY_READ_FROM_SQLITE=true` 可切换 SQLite 优先读取 session/case/ticket 维度（失败时回退 JSON），灰度验证中。
+7. **不做复杂客户画像**：长期记忆保持轻量化定位，不做自动跨 session 召回、客户画像、偏好建模等复杂功能。仅提供售后服务连续性所需的轻量上下文补充。
 
 #### 暂不做的方向
 
@@ -679,9 +681,6 @@ DEFAULT_EMBEDDING_MODEL=text-embedding-v3
 FASTAPI_HOST=127.0.0.1
 FASTAPI_PORT=8800
 
-GRADIO_HOST=127.0.0.1
-GRADIO_PORT=7860
-
 DEFAULT_PARSER=pypdf
 DEFAULT_CHUNK_SIZE=700
 DEFAULT_CHUNK_OVERLAP=80
@@ -694,8 +693,6 @@ MINERU_API_TOKEN=
 MINERU_DOWNLOAD_VERIFY_SSL=true
 
 # 功能开关
-MEMORY_ANSWER_V2=true   # 设为 true 开启 LLM 驱动记忆精确问答（v2，默认关闭）
-
 # 长期记忆 SQLite 双写
 MEMORY_SQLITE_DUAL_WRITE=true   # 设为 true 开启 SQLite 双写和调试 API（默认开启）
 
@@ -776,15 +773,6 @@ http://127.0.0.1:5173
 
 ---
 
-### 5.4 Gradio 备用入口
-
-当前 Gradio 已不是主前端。仅在需要旧版研发演示时启动：
-
-```powershell
-cd /d D:\AfterSalesAgentV2
-D:\AfterSalesAgentV2\.venvV2\Scripts\python.exe gradio_app.py
-```
-
 ---
 
 ## 6. 使用流程
@@ -851,7 +839,7 @@ D:\AfterSalesAgentV2\.venvV2\Scripts\python.exe -m unittest discover -s tests -v
 
 ```powershell
 cd /d D:\AfterSalesAgentV2
-D:\AfterSalesAgentV2\.venvV2\Scripts\python.exe -m compileall backend api.py gradio_app.py
+D:\AfterSalesAgentV2\.venvV2\Scripts\python.exe -m compileall backend api.py
 ```
 
 ### 8.3 前端测试
@@ -933,7 +921,6 @@ C-TEMP-09：枪头温度过高
 1. 未加载知识库时，系统不会编造具体故障原因。
 2. 保修判断必须依赖知识库中的保修期限和客户提供的购买/安装时间。
 3. Memory 当前只用于上下文补全，不作为诊断证据。
-4. Gradio 前端已不作为主入口。
 5. 工具当前是本地 Python 调用，暂未接 MCP。
 6. React 前端为了轻量化，只展示 summary，不展示完整 trace 和 RAG 原始 chunk。
 7. MinerU 依赖外部 API 和网络环境，可能出现 ZIP 下载失败、SSL 校验失败或 CDN 连接中断。
@@ -973,9 +960,9 @@ C-TEMP-09：枪头温度过高
 | `case_rules.py` | 品牌/型号/功率正则语义抽取 | **删除**，改为 LLM 抽取 |
 | `case_rules.py` | 手机号正则、故障码格式正则、功率单位归一化 | **保留**，加 `# deterministic:` 注释 |
 | `dispatch_rules.py` | 派工模板字符串 | 迁移到 `data/rules/dispatch_templates.json` |
-| `graph_workflow.py` | `_is_memory_recall_query()` 中字段级硬编码匹配 | **删除**，改为调用 `parse_memory_query()` |
-| `graph_workflow.py` | `_memory_query_type()` 中 if/else 问法分支 | **删除**，字段选择由 LLM 完成 |
-| `graph_workflow.py` | `_build_memory_reply()` 中字段拼接模板 | **重构**，改为 LLM 生成回答 |
+| `graph_workflow.py` | `_is_memory_recall_query()` 中字段级硬编码匹配 | **保留并重写**，内联关键词为轻量 gate（不调 LLM） |
+| `graph_workflow.py` | `_memory_query_type()` 中 if/else 问法分支 | **已删除**，字段选择由 LLM 完成 |
+| `graph_workflow.py` | `_build_memory_reply()` 中字段拼接模板 | **已删除**，改为 v2 LLM 生成 + `_build_memory_reply_v2()` 兜底 |
 | `backend/agents/` | Agent 内部可能散落的字段判断 if/else | 审查后清理，改为依赖 Schema 约束 |
 | `backend/prompts/` | Prompt 中可能硬编码的字段列表或示例值 | 审查后改为引用 `schemas.py` 字段定义 |
 | `backend/schemas.py` | 暂无已知硬编码，但需确认 dataclass 字段是否与 Prompt 要求一致 | 审查对齐 |
@@ -1032,7 +1019,7 @@ data/rules/
 
 ### 11.2 Memory Answer 精确问答 ✅ 已完成
 
-**状态**：开发完成，通过 `MEMORY_ANSWER_V2=true` 环境变量开启。
+**状态**：v2 是当前唯一记忆问答链路。旧版 `_memory_query_type` / `_build_memory_reply` 模板链路已于 2026-06 删除，不再提供 `MEMORY_ANSWER_V2` 开关。
 
 **目标**：让系统能精确回答”刚才我说的型号是什么？””上次工单优先级？””还缺哪些信息？”等记忆召回问题。
 
@@ -1040,8 +1027,7 @@ data/rules/
 
 ```
 用户输入
-  → _is_memory_recall_query() 粗粒度关键词判断（保留不变，旧链路 [deprecated]）
-  → MEMORY_ANSWER_V2=true 时进入新链路：
+  → _is_memory_recall_query() 轻量关键词 gate → 确认后进入 v2 三阶段 pipeline：
      1. _parse_memory_query()       → LLM 解析查询意图 → MemoryQueryResult
      2. _resolve_memory_fields()    → Pass1 结构化来源 (high) + Pass2 FTS5 (medium) → MemoryFieldResolution
      3. _build_memory_answer_llm()  → LLM 生成自然语言回答 → 不可用时回退 _build_memory_reply_v2()
@@ -1054,7 +1040,6 @@ data/rules/
 | `backend/schemas.py` | `MemoryQueryResult`（29 字段枚举 + clean/normalize），`MemoryFieldResolution`（resolved/missing/confidence/sources），`normalize_power_kw()` |
 | `backend/prompts/memory_query.py` | `MEMORY_QUERY_PARSE_PROMPT`，`FTS5_FIELD_EXTRACTION_PROMPT`（含 source_index），`MEMORY_ANSWER_GENERATION_PROMPT`（含 7 条约束） |
 | `backend/graph_workflow.py` | 6 个 v2 方法：parse / resolve / fts5_extract / answer_llm / format / clean / validate |
-| `backend/config.py` | `MEMORY_ANSWER_V2 = read_bool_env(“MEMORY_ANSWER_V2”, False)` |
 | `tests/eval/test_memory_parse.py` | 56 条单元测试（schema / resolver / fts5 / reply / answer_llm） |
 | `tests/eval/memory_answer_eval.json` | 10 条评估用例 |
 
@@ -1121,15 +1106,11 @@ LLM 不能发明枚举外的字段；非法字段自动丢弃并记录 warning t
 
 #### 11.2.7 开启方式
 
-```bash
-# .env 中设置
-MEMORY_ANSWER_V2=true
+v2 为当前唯一记忆问答链路，无需额外配置。可通过以下命令验证：
 
-# 验证
+```bash
 python tests/eval/test_memory_parse.py   # 56 条全部通过
 ```
-
-关闭 `MEMORY_ANSWER_V2=false`（默认）时，旧链路（`_memory_query_type` / `_build_memory_reply`）行为不变，所有旧函数标记 `[deprecated]`。
 
 #### 11.2.8 入口判断增强（上下文追问 gate）✅ 已完成
 
@@ -1324,7 +1305,7 @@ run()
 
 ### 11.5 前端增强
 
-当前 React 前端已经替代 Gradio，后续可继续增强：
+当前前端为 React，后续可继续增强：
 
 1. 增加完整 run log 查看页
    当前只显示 `debug_log_path`，后续仍以服务端日志文件和本地 logs 目录保存为主，不计划在前端直接展示完整日志内容，避免暴露内部 trace、tool history 和大体积调试信息。
@@ -1436,7 +1417,7 @@ run()
 
 ```powershell
 D:\AfterSalesAgentV2\.venvV2\Scripts\python.exe -m unittest discover -s tests -v
-D:\AfterSalesAgentV2\.venvV2\Scripts\python.exe -m compileall backend api.py gradio_app.py
+D:\AfterSalesAgentV2\.venvV2\Scripts\python.exe -m compileall backend api.py
 cd frontend
 npm.cmd run test
 npm.cmd run build
@@ -1473,7 +1454,6 @@ React 前端
 | React 前端 | ✅ 完成 | 安全诊断工作台，知识库构建，RAG 检索，系统状态 |
 | FastAPI 后端 | ✅ 完成 | 同步 + 流式 SSE 接口，CORS |
 | RAG 知识库 | ✅ 完成 | FAISS + BM25 + RRF 混合检索，pypdf / MinerU 双解析器 |
-| Gradio 旧版入口 | 🟡 保留 | gradio_app.py 作为备用 |
 
 ### memory_answer v2 技术亮点
 
@@ -1481,7 +1461,6 @@ React 前端
 - **双阶段 resolver**：结构化来源（high）→ FTS5 + LLM 抽取（medium），source-aware confidence
 - **防编造**：`_validate_answer_fields()` 检测到 LLM 编造缺失字段 → 自动回退确定性模板
 - **全链路 debug trace**：parse / resolution / answer_llm / FTS5 每一步都可追溯
-- **旧链路完整保留**：`MEMORY_ANSWER_V2=false` 时行为不变
 
 ### 当前最值得继续优化的方向
 

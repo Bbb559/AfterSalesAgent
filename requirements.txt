@@ -10,7 +10,6 @@ langgraph
 fastapi
 uvicorn
 python-multipart
-gradio
 faiss-cpu
 rank-bm25
 numpy

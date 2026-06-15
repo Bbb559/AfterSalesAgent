@@ -48,30 +48,30 @@
 ### 2.1 总体架构
 
 ```mermaid
-flowchart TD
-    User["用户 / 客服输入"] --> React["React 充电桩安全诊断工作台"]
-    React --> FastAPI["FastAPI 后端接口"]
+flowchart LR
+    User["用户 / 客服输入"] --> FE["React 前端工作台"]
 
-    FastAPI --> Workflow["ChargerDiagnosisWorkflow<br/>LangGraph 工作流"]
+    FE --> API["FastAPI 后端接口"]
 
-    Workflow --> Agents["LLM Agents<br/>Intent / Case / Diagnosis / Action / Audit"]
-    Workflow --> RAG["RAGService<br/>知识库检索"]
-    Workflow --> Rules["本地 Rules<br/>输入安全 / Case 规整 / 安全分级 / 输出拦截"]
-    Workflow --> Tools["本地 Tools<br/>Memory / Warranty"]
-    Workflow --> Memory["MemoryManager<br/>会话记忆与长期摘要"]
+    API --> WF["LangGraph<br/>售后诊断工作流"]
 
-    RAG --> Parser["PDF Parser<br/>pypdf / MinerU"]
-    RAG --> Splitter["Text Splitter<br/>recursive / simple"]
-    RAG --> Vector["FAISS Vector Store"]
-    RAG --> BM25["BM25 Retriever"]
-    RAG --> RRF["RRF 融合排序"]
-    RAG --> QueryRewrite["Query Rewrite"]
+    WF --> LLM["LLM Agents<br/>意图识别 / Case抽取 / 诊断 / 回复 / 审核"]
+    WF --> RAG["Agentic RAG<br/>FAISS + BM25 + RRF<br/>产品文档 / 故障码 / 保修政策"]
+    WF --> Rules["本地安全规则<br/>高风险识别 / 输出拦截 / 防编造"]
+    WF --> Tools["业务工具<br/>保修核验 / 派工草稿"]
+    WF --> Memory["会话记忆<br/>JSON Memory + SQLite FTS5"]
 
-    Memory --> JsonMemory["JSON Memory<br/>Session / Customer / Charger / Site / Ticket"]
-    Memory --> SQLiteFTS["SQLite FTS5<br/>Session messages search"]
+    LLM --> Result["客户回复<br/>诊断结论<br/>保修辅助<br/>派工草稿"]
+    RAG --> Result
+    Rules --> Result
+    Tools --> Result
+    Memory --> Result
 
-    Workflow --> Result["客户回复 / 派工草稿 / 审核结果 / Trace / Tool History"]
-    Result --> React
+    Result --> Audit["安全审核与治理留痕"]
+    Audit --> FE
+
+    Audit --> Log["Debug Log / Trace / Tool History"]
+    Memory <--> Log
 ```
 
 ---

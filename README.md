@@ -519,7 +519,7 @@ data/memory/
 
 SQLite FTS5 只索引 Session messages，用于当前会话消息搜索。
 
-它不是主存储，不替代 JSON。
+它不是主存储，不替代 JSON（暂时）。
 
 作用：
 
@@ -528,9 +528,9 @@ SQLite FTS5 只索引 Session messages，用于当前会话消息搜索。
 * 不作为 RAG 知识库
 * 不作为诊断依据
 
-#### 3. SQLite 长期记忆双写（阶段 2-4）
+#### 3. SQLite 长期记忆双写
 
-自阶段 2 起，每次 workflow 完成后，MemoryManager 会将 session / messages / case / ticket / summary 同步写入 SQLite（`data/memory/long_term.sqlite`）。写入通过 feature flag 控制：
+每次 workflow 完成后，MemoryManager 会将 session / messages / case / ticket / summary 同步写入 SQLite（`data/memory/long_term.sqlite`）。写入通过 feature flag 控制：
 
 ```bash
 # .env
@@ -695,7 +695,7 @@ MINERU_DOWNLOAD_VERIFY_SSL=true
 # 长期记忆 SQLite 双写
 MEMORY_SQLITE_DUAL_WRITE=true   # 设为 true 开启 SQLite 双写和调试 API（默认开启）
 
-# SQLite 主读（阶段 3 — 验证中，默认关闭）
+# SQLite 主读（阶段验证中，默认关闭）
 MEMORY_READ_FROM_SQLITE=false   # true → recall_context() 优先从 SQLite 读取，失败时回退 JSON
 
 # Session TTL 配置（天数）
@@ -853,6 +853,13 @@ npm.cmd run test
 ```powershell
 cd /d D:\AfterSalesAgentV2\frontend
 npm.cmd run build
+```
+
+### 8.5 效果类指标评估
+
+```powershell
+python docs/eval/test_rag_eval.py      # RAG 检索命中率
+python docs/eval/test_safety_eval.py    # 安全信号分类准确率
 ```
 
 ---
@@ -1018,7 +1025,7 @@ data/rules/
 
 ### 11.2 Memory Answer 精确问答 ✅ 已完成
 
-**状态**：v2 是当前唯一记忆问答链路。旧版 `_memory_query_type` / `_build_memory_reply` 模板链路已于 2026-06 删除，不再提供 `MEMORY_ANSWER_V2` 开关。
+**状态**：v2 是当前唯一记忆问答链路。旧版 `_memory_query_type` / `_build_memory_reply` 模板链路已删除，不再提供 `MEMORY_ANSWER_V2` 开关。
 
 **目标**：让系统能精确回答”刚才我说的型号是什么？””上次工单优先级？””还缺哪些信息？”等记忆召回问题。
 
@@ -1046,12 +1053,12 @@ data/rules/
 
 所有字段定义在 `MEMORY_QUERY_TARGET_FIELDS` 中，带来源 dataclass 注释：
 
-- **设备信息**（ChargerCase）：brand, charger_model, charger_series, rated_power_kw, charger_type, connector_type, serial_number
+- **设备信息**（ChargerCase）：brand, charger_model, charger_series, rated_power_kw, charger_type, connector_type（接口类型）, serial_number（设备序列号）
 - **现场信息**（ChargerCase）：city, contact_address, installation_type, purchase_or_install_time
-- **故障信息**（ChargerCase）：fault_codes, observed_symptoms, safety_signals, environment_factors, trip_status, indicator_status
-- **安全与诊断**（SafetyResult / ChargerDiagnosisResult）：risk_level, need_onsite, need_electrician, diagnosis_summary, suggested_next_step
-- **工单信息**（DispatchDraft / ChargerCase）：ticket_id, ticket_title, ticket_priority, missing_info
-- **对话与回复**（SessionMemory）：last_customer_reply, last_user_message, customer_request
+- **故障信息**（ChargerCase）：fault_codes, observed_symptoms（可见故障现象）, safety_signals, environment_factors（环境影响因素）, trip_status（行程状态）, indicator_status（指示灯状态）
+- **安全与诊断**（SafetyResult / ChargerDiagnosisResult）：risk_level, need_onsite, need_electrician（是否需要电工）, diagnosis_summary, suggested_next_step（建议后续操作）
+- **工单信息**（DispatchDraft / ChargerCase）：ticket_id, ticket_title, ticket_priority（工单优先级）, missing_info
+- **对话与回复**（SessionMemory）：last_customer_reply, last_user_message, customer_request（客户诉求）
 
 LLM 不能发明枚举外的字段；非法字段自动丢弃并记录 warning trace。
 
@@ -1468,6 +1475,20 @@ React 前端
 3. 前端 run log 详情查看与节点弹窗
 4. 简化长期记忆设计，重点保留当前 session 与短期上下文
 5. 工具层后续 MCP 化
+
+### 效果类指标（MVP 阶段确定性评估，不依赖 LLM）
+
+| 指标 | 数值 | 说明 |
+|------|------|------|
+| RAG Top-1 命中率 | **90%** | 20 条知识库内问题，FAISS + BM25 + RRF hybrid 检索 |
+| RAG Top-3 命中率 | **100%** | 同上 |
+| RAG Top-5 命中率 | **100%** | 同上 |
+| 安全分类整体准确率 | **100%** | 30 条场景（confirmed / negated / uncertain / safe） |
+| 安全分类漏报率 | **0%** | 0/10 confirmed 场景被漏判 |
+| 安全分类误报率 | **0%** | 0/20 safe 场景被误判为高风险 |
+| 确认信号 F1 | **0.95** | 精确率 100% / 召回率 90% |
+
+评估脚本和测试集见 `docs/eval/`，详细报告见 `docs/eval_metrics.md`。
 
 本项目适合作为大模型 Agent / Agentic RAG / 售后智能客服 / 安全诊断工作流方向的完整作品集项目。
 

@@ -151,9 +151,7 @@
 
 ---
 
-## 4. 简历用量化成果描述
-
-> 以下为可放进简历的保守表述。主要回归数据由 `pytest tests/ --ignore=tests/eval -v` 复现；Memory parse 的 56 条需单独运行 `tests/eval` 对应脚本。
+## 4. 量化成果描述
 
 ---
 
@@ -182,6 +180,10 @@
 - **210+ 自动化测试通过基线**：216 条后端测试收集（210 passed / 6 skipped / 0 failed），覆盖 workflow、safety、memory、RAG、API contract、LLM 降级；+ 5 条前端测试
 - **22 条冒烟测试设计**：离线 workflow 16 条全通过；集成测试 U1/U2/U3/F1 通过，F2/K1 因端点未实现或索引未构建安全跳过（不硬失败）
 - 基于自测样例的未知知识库 insufficient 识别：3/3 通过，无编造
+
+**效果指标**（MVP 阶段确定性评估，不依赖 LLM，运行方式见 `docs/eval/`）：
+- **RAG 检索命中率**：20 条知识库内标准测试集，FAISS + BM25 + RRF 混合检索，Hit@1 = 90%，Hit@3 = 100%，Hit@5 = 100%
+- **安全信号分类准确率**：30 条安全场景测试集（confirmed / negated / uncertain / safe 四类），整体准确率 100%，漏报率 0%，误报率 0%，确认信号 F1 = 0.95
 
 ---
 

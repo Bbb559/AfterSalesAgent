@@ -95,9 +95,7 @@ python docs/eval/test_safety_eval.py
 
 ---
 
-## 3. 简历用量化表述
-
-> 以下为可放进简历的保守表述，可直接替换 eval_report.md 中第 4 节的部分内容。
+## 3. 量化表述
 
 ---
 

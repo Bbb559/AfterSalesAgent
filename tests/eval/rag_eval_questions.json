@@ -1,0 +1,182 @@
+[
+  {
+    "id": "rag_001",
+    "question": "TP-LINK 7kW 交流充电桩安装时对接地有什么要求？",
+    "expected": {
+      "hit_chunk_keywords": ["地线", "接地", "桩体地线排"],
+      "hit_file_keywords": ["TP-LINK"],
+      "description": "TP-LINK 安装手册中的接地要求"
+    }
+  },
+  {
+    "id": "rag_002",
+    "question": "Poros WS-32 充电桩有哪些电气保护功能？",
+    "expected": {
+      "hit_chunk_keywords": ["保护", "过压", "过流", "漏电"],
+      "hit_file_keywords": ["Poros"],
+      "description": "Poros WS-32 手册中的保护功能说明"
+    }
+  },
+  {
+    "id": "rag_003",
+    "question": "Delta AC Mini Plus 充电器安装需要注意什么安全事项？",
+    "expected": {
+      "hit_chunk_keywords": ["安全", "安装", "电源", "保护"],
+      "hit_file_keywords": ["Delta"],
+      "description": "Delta AC Mini Plus 安装手册中的安全事项"
+    }
+  },
+  {
+    "id": "rag_004",
+    "question": "20-40kW 直流充电桩安装时对场地和配电有什么要求？",
+    "expected": {
+      "hit_chunk_keywords": ["防雨棚", "配电", "安装", "车位"],
+      "hit_file_keywords": ["直流"],
+      "description": "直流充电桩用户手册中的安装要求"
+    }
+  },
+  {
+    "id": "rag_005",
+    "question": "阳光电源 IDC120 直流充电桩有哪些安全保护措施？",
+    "expected": {
+      "hit_chunk_keywords": ["保护", "急停", "安全", "高压", "断电"],
+      "hit_file_keywords": ["阳光电源"],
+      "description": "阳光电源 IDC120 手册中的安全保护内容"
+    }
+  },
+  {
+    "id": "rag_006",
+    "question": "赛力斯家用充电桩服务包包含哪些权益？",
+    "expected": {
+      "hit_chunk_keywords": ["赛力斯", "服务", "保修", "安装"],
+      "hit_file_keywords": ["赛力斯"],
+      "description": "赛力斯服务包权益说明"
+    }
+  },
+  {
+    "id": "rag_007",
+    "question": "AITO 家充桩服务包权益有效期是多久？",
+    "expected": {
+      "hit_chunk_keywords": ["AITO", "服务", "权益", "有效期", "年"],
+      "hit_file_keywords": ["AITO"],
+      "description": "AITO 服务包权益有效期说明"
+    }
+  },
+  {
+    "id": "rag_008",
+    "question": "华为家充桩产品权益有哪些内容？",
+    "expected": {
+      "hit_chunk_keywords": ["华为", "权益", "充电桩", "服务"],
+      "hit_file_keywords": ["华为"],
+      "description": "华为家充桩产品权益说明"
+    }
+  },
+  {
+    "id": "rag_009",
+    "question": "公共机构建设电动汽车充电基础设施需要遵循什么规范？",
+    "expected": {
+      "hit_chunk_keywords": ["公共机构", "充电基础设施", "配置", "规范"],
+      "hit_file_keywords": ["公共机构"],
+      "description": "公共机构充电基础设施配置指南"
+    }
+  },
+  {
+    "id": "rag_010",
+    "question": "充电桩维护保养前需要做什么安全操作？",
+    "expected": {
+      "hit_chunk_keywords": ["断开", "空开", "等候", "放电", "维护"],
+      "hit_file_keywords": [],
+      "description": "充电桩维护安全操作（断开电源等候放电）"
+    }
+  },
+  {
+    "id": "rag_011",
+    "question": "充电桩运行过程中发现异常应该怎么处理？",
+    "expected": {
+      "hit_chunk_keywords": ["急停", "切断电源", "异常"],
+      "hit_file_keywords": [],
+      "description": "异常情况应急处理"
+    }
+  },
+  {
+    "id": "rag_012",
+    "question": "TP-LINK 7kW 充电桩的输入电源有什么要求？",
+    "expected": {
+      "hit_chunk_keywords": ["电源", "电压", "电流", "配电"],
+      "hit_file_keywords": ["TP-LINK"],
+      "description": "TP-LINK 充电桩电源接入要求"
+    }
+  },
+  {
+    "id": "rag_013",
+    "question": "充电桩产品的免费保修范围不包括哪些情况？",
+    "expected": {
+      "hit_chunk_keywords": ["保修", "免费", "不", "安装", "改装"],
+      "hit_file_keywords": [],
+      "description": "保修范围排除条款"
+    }
+  },
+  {
+    "id": "rag_014",
+    "question": "直流充电桩支持哪些电网制式？",
+    "expected": {
+      "hit_chunk_keywords": ["TN-S", "TN-C-S", "TT", "电网"],
+      "hit_file_keywords": ["直流"],
+      "description": "直流充电桩电网制式要求"
+    }
+  },
+  {
+    "id": "rag_015",
+    "question": "充电桩安装施工需要选择什么样的施工单位？",
+    "expected": {
+      "hit_chunk_keywords": ["专业", "资质", "施工", "安装"],
+      "hit_file_keywords": [],
+      "description": "安装施工资质要求"
+    }
+  },
+  {
+    "id": "rag_016",
+    "question": "Poros WS-32 的额定参数和适用场景是什么？",
+    "expected": {
+      "hit_chunk_keywords": ["Poros", "WS-32", "额定", "参数"],
+      "hit_file_keywords": ["Poros"],
+      "description": "Poros WS-32 产品参数说明"
+    }
+  },
+  {
+    "id": "rag_017",
+    "question": "充电桩的防雨和散热有什么安装要求？",
+    "expected": {
+      "hit_chunk_keywords": ["防雨", "散热", "通风", "温度"],
+      "hit_file_keywords": [],
+      "description": "充电桩防护和散热安装要求"
+    }
+  },
+  {
+    "id": "rag_018",
+    "question": "充电桩出现过温保护怎么办？",
+    "expected": {
+      "hit_chunk_keywords": ["过温", "温度", "保护", "散热"],
+      "hit_file_keywords": [],
+      "description": "过温保护的应对措施"
+    }
+  },
+  {
+    "id": "rag_019",
+    "question": "赛力斯充电桩服务的保修期限是多久？",
+    "expected": {
+      "hit_chunk_keywords": ["赛力斯", "保修", "年", "期限"],
+      "hit_file_keywords": ["赛力斯"],
+      "description": "赛力斯保修期限"
+    }
+  },
+  {
+    "id": "rag_020",
+    "question": "充电桩设备运行时有哪些人身安全风险需要注意？",
+    "expected": {
+      "hit_chunk_keywords": ["高电压", "电击", "灼伤", "安全"],
+      "hit_file_keywords": [],
+      "description": "充电桩运行时的人身安全风险警示"
+    }
+  }
+]

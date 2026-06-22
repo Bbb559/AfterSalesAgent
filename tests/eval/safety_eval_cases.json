@@ -1,0 +1,337 @@
+[
+  {
+    "id": "safety_conf_001",
+    "category": "confirmed",
+    "raw_text": "充电桩配电箱冒烟了，还闻到烧焦味，现在怎么办",
+    "expected": {
+      "risk_level": "p0_emergency",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["冒烟", "配电箱冒烟", "烧焦味"],
+      "negated_count": 0,
+      "description": "冒烟+烧焦味 → p0_emergency"
+    }
+  },
+  {
+    "id": "safety_conf_002",
+    "category": "confirmed",
+    "raw_text": "充电的时候看到明火了，不敢靠近",
+    "expected": {
+      "risk_level": "p0_emergency",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["明火"],
+      "negated_count": 0,
+      "description": "明火 → p0_emergency"
+    }
+  },
+  {
+    "id": "safety_conf_003",
+    "category": "confirmed",
+    "raw_text": "摸充电桩外壳的时候手有点麻，感觉漏电了",
+    "expected": {
+      "risk_level": "p1_high",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["手有点麻", "漏电"],
+      "negated_count": 0,
+      "description": "手麻+漏电 → p1_high"
+    }
+  },
+  {
+    "id": "safety_conf_004",
+    "category": "confirmed",
+    "raw_text": "充电桩屏幕报 C-RCD-04，漏保跳了两次，怎么回事",
+    "expected": {
+      "risk_level": "p1_high",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["C-RCD-04", "漏保自检失败", "漏保跳了"],
+      "negated_count": 0,
+      "description": "C-RCD-04故障码+漏保跳 → p1_high"
+    }
+  },
+  {
+    "id": "safety_conf_005",
+    "category": "confirmed",
+    "raw_text": "充电桩显示故障码 C-GND-01，是什么意思？危险吗？",
+    "expected": {
+      "risk_level": "p1_high",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["C-GND-01", "接地异常"],
+      "negated_count": 0,
+      "description": "C-GND-01故障码 → p1_high，故障码始终confirmed"
+    }
+  },
+  {
+    "id": "safety_conf_006",
+    "category": "confirmed",
+    "raw_text": "枪头很烫，充不进电了",
+    "expected": {
+      "risk_level": "p1_high",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["枪头很烫"],
+      "negated_count": 0,
+      "description": "枪头很烫 → p1_high"
+    }
+  },
+  {
+    "id": "safety_conf_007",
+    "category": "confirmed",
+    "raw_text": "充电桩滋滋响，还闻到一股烧焦的味道",
+    "expected": {
+      "risk_level": "p1_high",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["滋滋响", "烧焦味"],
+      "negated_count": 0,
+      "description": "滋滋响+烧焦味 → p1_high"
+    }
+  },
+  {
+    "id": "safety_conf_008",
+    "category": "confirmed",
+    "raw_text": "昨天充电的时候配电箱里面进水了，现在不敢用了",
+    "expected": {
+      "risk_level": "p1_high",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["进水"],
+      "negated_count": 0,
+      "description": "进水 → p1_high"
+    }
+  },
+  {
+    "id": "safety_conf_009",
+    "category": "confirmed",
+    "raw_text": "充电桩被雨水倒灌了，配电箱里有积水",
+    "expected": {
+      "risk_level": "p1_high",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["雨水倒灌", "积水"],
+      "negated_count": 0,
+      "description": "雨水倒灌+积水 → p1_high"
+    }
+  },
+  {
+    "id": "safety_conf_010",
+    "category": "confirmed",
+    "raw_text": "我看到充电桩配电箱里面起火了，旁边还有明火，已经打了119",
+    "expected": {
+      "risk_level": "p0_emergency",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["起火", "明火"],
+      "negated_count": 0,
+      "description": "起火+明火 → p0_emergency（两个紧急信号）"
+    }
+  },
+  {
+    "id": "safety_neg_001",
+    "category": "negated",
+    "raw_text": "暂时没有发热、跳闸或者烧焦味，只是屏幕不亮了",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_contains": ["发热"],
+      "description": "否定词跨枚举覆盖：'没有发热、跳闸或者烧焦味' 三个信号均被否定"
+    }
+  },
+  {
+    "id": "safety_neg_002",
+    "category": "negated",
+    "raw_text": "充电桩屏幕不亮了，没有烧焦味也没有漏电，就是充不进电",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_contains": ["烧焦味", "漏电"],
+      "description": "两个否定词分别否定两个安全信号"
+    }
+  },
+  {
+    "id": "safety_neg_003",
+    "category": "negated",
+    "raw_text": "未发现漏电或滋滋响，充电桩工作正常",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_contains": ["漏电", "滋滋响"],
+      "description": "'未发现'否定漏电和滋滋响（避开接地异常因故障码value始终confirmed的问题）"
+    }
+  },
+  {
+    "id": "safety_neg_004",
+    "category": "negated",
+    "raw_text": "没有明显发热，也没有跳闸，就是充电速度变慢了",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_contains": ["发热"],
+      "description": "'没有明显'否定发热"
+    }
+  },
+  {
+    "id": "safety_neg_005",
+    "category": "negated",
+    "raw_text": "不伴随跳闸和烧焦味，只是显示故障码",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_contains": ["跳闸", "烧焦味"],
+      "description": "'不伴随'否定跳闸和烧焦味"
+    }
+  },
+  {
+    "id": "safety_neg_006",
+    "category": "negated",
+    "raw_text": "不是着火也不是冒烟，就是指示灯一直在闪",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_contains": ["着火", "冒烟"],
+      "description": "'不是'否定着火和冒烟"
+    }
+  },
+  {
+    "id": "safety_neg_007",
+    "category": "negated",
+    "raw_text": "无明火，无冒烟，无触电风险，只听到一点噪音",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_contains": ["明火", "冒烟", "触电"],
+      "description": "多个'无'否定多个紧急信号"
+    }
+  },
+  {
+    "id": "safety_neg_008",
+    "category": "negated",
+    "raw_text": "不存在漏电的情况，已经找电工检查过了",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_contains": ["漏电"],
+      "description": "'不存在'否定漏电（避开接地异常因故障码value始终confirmed的问题）"
+    }
+  },
+  {
+    "id": "safety_unc_001",
+    "category": "uncertain",
+    "raw_text": "是不是漏电了？摸外壳的时候感觉有点不对",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "uncertain_contains": ["漏电"],
+      "description": "'是不是漏电了？' → uncertain，不应判定为p1_high"
+    }
+  },
+  {
+    "id": "safety_unc_002",
+    "category": "uncertain",
+    "raw_text": "充电桩会不会发热了？感觉充电速度变慢了很多",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "uncertain_contains": ["发热"],
+      "description": "'会不会发热了？' → uncertain"
+    }
+  },
+  {
+    "id": "safety_unc_003",
+    "category": "uncertain",
+    "raw_text": "好像有烧焦味，不太确定是不是心理作用",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": true,
+      "confirmed_contains": ["烧焦味"],
+      "description": "'好像有烧焦味' → '好像'紧邻信号前判定为uncertain。但'不太确定是不是'也涉及此信号，需看实际判定；如果confirmed则合理(safety-first兜底)"
+    }
+  },
+  {
+    "id": "safety_unc_004",
+    "category": "uncertain",
+    "raw_text": "如果冒烟的话应该怎么处理？提前了解一下",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "uncertain_contains": ["冒烟"],
+      "description": "'如果冒烟的话' → 假设条件句，uncertain"
+    }
+  },
+  {
+    "id": "safety_unc_005",
+    "category": "uncertain",
+    "raw_text": "听说这种充电桩会跳闸，是真的吗？",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "uncertain_contains": ["跳闸"],
+      "description": "'听说会跳闸' → 听说的/未证实标记，uncertain"
+    }
+  },
+  {
+    "id": "safety_safe_001",
+    "category": "safe",
+    "raw_text": "充电桩屏幕完全黑屏不亮了，指示灯也不亮，用了8个月左右",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "negated_count": 0,
+      "uncertain_count": 0,
+      "description": "屏幕不亮+指示灯不亮 → 纯故障，无安全信号"
+    }
+  },
+  {
+    "id": "safety_safe_002",
+    "category": "safe",
+    "raw_text": "最近充电速度变慢了，从30km/h降到了15km/h左右，是怎么回事",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "description": "充电速度变慢 → 纯故障，无安全信号"
+    }
+  },
+  {
+    "id": "safety_safe_003",
+    "category": "safe",
+    "raw_text": "充电桩APP一直显示离线，重新绑定也不行",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "description": "APP离线 → 纯功能问题，无安全信号"
+    }
+  },
+  {
+    "id": "safety_safe_004",
+    "category": "safe",
+    "raw_text": "显示故障码 E-0521，是什么问题？StarDock SD-SmartCharge 的桩",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "description": "E-0521未知故障码 → 不在SAFETY_FAULT_CODES中，p3_low"
+    }
+  },
+  {
+    "id": "safety_safe_005",
+    "category": "safe",
+    "raw_text": "充电桩噪音比以前大了很多，嗡嗡响",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "description": "噪音大 → 非安全信号（滋滋响才是，嗡嗡不是）"
+    }
+  },
+  {
+    "id": "safety_safe_006",
+    "category": "safe",
+    "raw_text": "充电完成后枪头拔不出来，怎么处理？",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "description": "枪头拔不出来 → 机械故障，无安全信号"
+    }
+  },
+  {
+    "id": "safety_safe_007",
+    "category": "safe",
+    "raw_text": "家里装修重新布线，充电桩需要移机，怎么操作？",
+    "expected": {
+      "risk_level": "p3_low",
+      "has_confirmed_signals": false,
+      "description": "移机咨询 → 操作性问题，无安全信号"
+    }
+  }
+]

@@ -35,7 +35,7 @@
 ### 1.4 运行方式
 
 ```bash
-python tests/eval/test_rag_eval.py
+python docs/eval/test_rag_eval.py
 ```
 
 ---
@@ -90,7 +90,7 @@ python tests/eval/test_rag_eval.py
 ### 2.6 运行方式
 
 ```bash
-python tests/eval/test_safety_eval.py
+python docs/eval/test_safety_eval.py
 ```
 
 ---
